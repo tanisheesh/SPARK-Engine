@@ -1,0 +1,74 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Next.js build output
+.next/
+out/
+
+# Electron build output
+dist/
+release/
+build/
+
+# Environment files
+.env*
+
+# Database files
+*.duckdb
+*.duckdb.wal
+.db-cache.json
+
+# Large CSV files
+activity_logs_12gb.csv
+*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Runtime files
+*.pid
+*.seed
+*.pid.lock
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Temporary files
+temp/
+tmp/
+temp_extract/
+
+# Kiro files
+.kiro/specs/
+.kiro/steering/
+
+# Package manager files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Misc
+*.pem
+.vercel

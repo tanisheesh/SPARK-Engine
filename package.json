@@ -1,0 +1,144 @@
+{
+  "name": "spark-engine",
+  "version": "1.0.0",
+  "description": "SPARK Engine - Voice Data Analytics Platform",
+  "author": "Team Binary Beast",
+  "main": "electron/main.js",
+  "homepage": "./",
+  "private": true,
+  "scripts": {
+    "dev": "echo '❌ Web mode disabled. Use: npm run app' && exit 1",
+    "app": "electron .",
+    "build": "next build",
+    "electron": "electron .",
+    "dist": "npm run build && electron-builder",
+    "pack": "npm run build && electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps",
+    "generate-icons": "node scripts/generate-icons.js"
+  },
+  "dependencies": {
+    "@deepgram/sdk": "^4.11.3",
+    "@types/papaparse": "^5.5.2",
+    "adm-zip": "^0.5.16",
+    "annyang": "^2.6.1",
+    "better-sqlite3": "^12.6.0",
+    "dagre": "^0.8.5",
+    "dotenv": "^17.2.3",
+    "electron-updater": "^6.8.3",
+    "framer-motion": "^12.26.2",
+    "html-to-image": "^1.11.13",
+    "mysql2": "^3.11.5",
+    "next": "16.1.2",
+    "papaparse": "^5.5.3",
+    "pg": "^8.13.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "reactflow": "^11.11.4"
+  },
+  "devDependencies": {
+    "@types/annyang": "^2.6.5",
+    "@types/dagre": "^0.7.52",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.23",
+    "concurrently": "^9.2.1",
+    "electron": "^32.3.3",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.2",
+    "postcss": "^8.5.6",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5",
+    "wait-on": "^8.0.5"
+  },
+  "build": {
+    "appId": "com.sparkengine.analytics",
+    "productName": "SPARK Engine",
+    "copyright": "Copyright © 2026 Team Binary Beast",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "electron/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "public/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "public/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico",
+      "license": "LICENSE",
+      "warningsAsErrors": false,
+      "displayLanguageSelector": false,
+      "allowElevation": true,
+      "perMachine": false,
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "menuCategory": "Productivity",
+      "shortcutName": "SPARK Engine",
+      "differentialPackage": false,
+      "packElevateHelper": true,
+      "uninstallDisplayName": "SPARK Engine - Voice Analytics Platform",
+      "include": "installer.nsh"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "public/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "minimumSystemVersion": "10.12.0"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "signtoolOptions": {
+        "publisherName": "Tanish Poddar"
+      }
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.png",
+      "category": "Office"
+    }
+  }
+}
