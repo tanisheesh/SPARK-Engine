@@ -187,161 +187,190 @@ class DatabaseConnector {
 
       const Database = require('better-sqlite3');
       const db = new Database(config.filePath, { readonly: true });
-
       console.log('✅ SQLite connected successfully');
 
-      // Get all tables if no specific table provided
+      // Get all tables
       let tables = [];
       if (config.table && config.table.trim()) {
         tables = [config.table];
       } else {
-        // Get all tables in database
         const tableRows = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
         tables = tableRows.map(row => row.name);
         console.log(`📋 Found ${tables.length} tables:`, tables.join(', '));
       }
 
-      const Papa = require('papaparse');
-      const exportedFiles = [];
-
-      // Export each table
-      for (const table of tables) {
-        console.log(`📊 Exporting table: ${table}...`);
-        
-        const rows = db.prepare(`SELECT * FROM ${table} LIMIT 100000`).all();
-        
-        if (rows.length === 0) {
-          console.log(`⚠️  Table ${table} is empty, skipping...`);
-          continue;
-        }
-
-        // Convert to CSV
-        const csvFileName = `sqlite_${path.basename(config.filePath, '.db')}_${table}_${Date.now()}.csv`;
-        const csvPath = path.join(this.dataDir, csvFileName);
-        
-        const csv = Papa.unparse(rows);
-        
-        fs.writeFileSync(csvPath, csv, 'utf8');
-        
-        exportedFiles.push({
-          table,
-          fileName: csvFileName,
-          path: csvPath,
-          rows: rows.length
-        });
-
-        console.log(`  ✅ ${table}: ${rows.length} rows exported`);
-      }
-      
       db.close();
 
-      const totalRows = exportedFiles.reduce((sum, f) => sum + f.rows, 0);
+      // Get DuckDB path
+      const dbFile = path.join(path.dirname(this.dataDir), 'data.duckdb');
+      const safeDbFile = path.resolve(dbFile);
+      const safeFilePath = config.filePath.replace(/\\/g, '/');
 
-      console.log(`✅ SQLite export complete: ${exportedFiles.length} tables, ${totalRows} total rows`);
+      let duckdbCommand = 'duckdb';
+      const appDir = path.dirname(process.execPath);
+      const possiblePaths = [
+        path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
+        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
+      ];
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) { duckdbCommand = `"${path.resolve(p)}"`; break; }
+      }
+
+      const dbName = path.basename(config.filePath, '.db').replace(/[^a-zA-Z0-9_]/g, '_');
+
+      // Clean up old sqlite tables
+      console.log('🧹 Cleaning up old SQLite tables...');
+      try {
+        const cleanupSQL = `SELECT 'DROP TABLE IF EXISTS ' || table_name || ';' as drop_stmt FROM information_schema.tables WHERE table_schema='main' AND table_name LIKE 'sqlite_%'`;
+        const { stdout: dropStmts } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "${cleanupSQL}"`, { timeout: 10000 });
+        const drops = JSON.parse(dropStmts.trim() || '[]');
+        if (drops.length > 0) {
+          const dropSQL = drops.map(d => d.drop_stmt).join(' ');
+          await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${dropSQL}"`, { timeout: 30000 });
+        }
+      } catch (e) { /* no old tables */ }
+
+      // Import each table directly from SQLite file using DuckDB's sqlite extension
+      console.log('📦 Installing SQLite extension...');
+      try {
+        await execPromise(`${duckdbCommand} "${safeDbFile}" -c "INSTALL sqlite; LOAD sqlite;"`, { timeout: 30000 });
+        console.log('✅ SQLite extension loaded');
+      } catch (e) {
+        console.log('⚠️ SQLite extension may already be installed');
+      }
+
+      // Build batch import SQL
+      const sqlCommands = [`ATTACH '${safeFilePath}' AS sqlite_source (TYPE sqlite)`];
+      for (const table of tables) {
+        const sanitizedName = `sqlite_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
+        sqlCommands.push(`DROP TABLE IF EXISTS ${sanitizedName}`);
+        sqlCommands.push(`CREATE TABLE ${sanitizedName} AS SELECT * FROM sqlite_source.${table}`);
+      }
+      sqlCommands.push('DETACH sqlite_source');
+
+      const batchSQL = sqlCommands.join('; ');
+      console.log('📊 Importing all SQLite tables into DuckDB...');
+      await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${batchSQL}"`, { timeout: 300000, maxBuffer: 100 * 1024 * 1024 });
+
+      // Get row counts
+      const importedTables = [];
+      let totalRows = 0;
+      for (const table of tables) {
+        const sanitizedName = `sqlite_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
+        try {
+          const { stdout } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "SELECT COUNT(*) as count FROM ${sanitizedName}"`, { timeout: 10000 });
+          const rowCount = JSON.parse(stdout.trim())[0]?.count || 0;
+          importedTables.push({ table, duckdbTable: sanitizedName, rows: rowCount });
+          totalRows += rowCount;
+          console.log(`  ✅ ${table}: ${rowCount} rows imported`);
+        } catch (e) {
+          console.error(`  ⚠️ Could not get count for ${table}`);
+        }
+      }
+
+      console.log(`✅ SQLite import complete: ${importedTables.length} tables, ${totalRows} total rows`);
 
       return {
         success: true,
-        message: `Imported ${exportedFiles.length} tables (${totalRows} rows) from SQLite`,
-        files: exportedFiles,
-        totalRows
+        message: `Imported ${importedTables.length} tables (${totalRows} rows) from SQLite`,
+        tables: importedTables,
+        totalRows,
+        connectionType: 'sqlite'
       };
 
     } catch (error) {
       console.error('❌ SQLite connection error:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
   /**
-   * Connect to PostgreSQL and export data to CSV via DuckDB
+   * Connect to PostgreSQL directly via DuckDB postgres extension
    */
   async connectPostgreSQL(config) {
     try {
       console.log('🐘 Connecting to PostgreSQL...', config);
-      
+
       const { Client } = require('pg');
-      
-      // Create connection
       const client = new Client({
-        host: config.host,
-        port: parseInt(config.port),
-        user: config.user,
-        password: config.password,
-        database: config.database
+        host: config.host, port: parseInt(config.port),
+        user: config.user, password: config.password, database: config.database
       });
-
       await client.connect();
-
       console.log('✅ PostgreSQL connected successfully');
 
-      // Get all tables if no specific table provided
       let tables = [];
       if (config.table && config.table.trim()) {
         tables = [config.table];
       } else {
-        // Get all tables in database
-        const result = await client.query(`
-          SELECT tablename FROM pg_tables 
-          WHERE schemaname = 'public'
-        `);
+        const result = await client.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`);
         tables = result.rows.map(row => row.tablename);
         console.log(`📋 Found ${tables.length} tables:`, tables.join(', '));
       }
-
-      const Papa = require('papaparse');
-      const exportedFiles = [];
-
-      // Export each table
-      for (const table of tables) {
-        console.log(`📊 Exporting table: ${table}...`);
-        
-        const result = await client.query(`SELECT * FROM ${table} LIMIT 100000`);
-        
-        if (result.rows.length === 0) {
-          console.log(`⚠️  Table ${table} is empty, skipping...`);
-          continue;
-        }
-
-        // Convert to CSV
-        const csvFileName = `postgres_${config.database}_${table}_${Date.now()}.csv`;
-        const csvPath = path.join(this.dataDir, csvFileName);
-        
-        const csv = Papa.unparse(result.rows);
-        
-        fs.writeFileSync(csvPath, csv, 'utf8');
-        
-        exportedFiles.push({
-          table,
-          fileName: csvFileName,
-          path: csvPath,
-          rows: result.rows.length
-        });
-
-        console.log(`  ✅ ${table}: ${result.rows.length} rows exported`);
-      }
-      
       await client.end();
 
-      const totalRows = exportedFiles.reduce((sum, f) => sum + f.rows, 0);
+      // DuckDB setup
+      const dbFile = path.join(path.dirname(this.dataDir), 'data.duckdb');
+      const safeDbFile = path.resolve(dbFile);
+      let duckdbCommand = 'duckdb';
+      const possiblePaths = [
+        path.join(path.dirname(process.execPath), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
+        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
+      ];
+      for (const p of possiblePaths) { if (fs.existsSync(p)) { duckdbCommand = `"${path.resolve(p)}"`; break; } }
 
-      console.log(`✅ PostgreSQL export complete: ${exportedFiles.length} tables, ${totalRows} total rows`);
+      const dbName = config.database.replace(/[^a-zA-Z0-9_]/g, '_');
 
-      return {
-        success: true,
-        message: `Imported ${exportedFiles.length} tables (${totalRows} rows) from PostgreSQL`,
-        files: exportedFiles,
-        totalRows
-      };
+      // Clean old postgres tables
+      console.log('🧹 Cleaning up old PostgreSQL tables...');
+      try {
+        const { stdout: dropStmts } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "SELECT 'DROP TABLE IF EXISTS ' || table_name || ';' as s FROM information_schema.tables WHERE table_schema='main' AND table_name LIKE 'postgres_%'"`, { timeout: 10000 });
+        const drops = JSON.parse(dropStmts.trim() || '[]');
+        if (drops.length > 0) {
+          await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${drops.map(d => d.s).join(' ')}"`, { timeout: 30000 });
+        }
+      } catch (e) { /* no old tables */ }
+
+      // Install postgres extension
+      console.log('📦 Installing PostgreSQL extension...');
+      try {
+        await execPromise(`${duckdbCommand} "${safeDbFile}" -c "INSTALL postgres; LOAD postgres;"`, { timeout: 30000 });
+        console.log('✅ PostgreSQL extension loaded');
+      } catch (e) { console.log('⚠️ PostgreSQL extension may already be installed'); }
+
+      // Build batch import SQL
+      const connStr = `host=${config.host} port=${config.port} user=${config.user} password=${config.password} dbname=${config.database}`;
+      const sqlCommands = [`ATTACH '${connStr}' AS pg_source (TYPE postgres)`];
+      for (const table of tables) {
+        const sanitizedName = `postgres_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
+        sqlCommands.push(`DROP TABLE IF EXISTS ${sanitizedName}`);
+        sqlCommands.push(`CREATE TABLE ${sanitizedName} AS SELECT * FROM pg_source.${table}`);
+      }
+      sqlCommands.push('DETACH pg_source');
+
+      console.log('📊 Importing all PostgreSQL tables into DuckDB...');
+      await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${sqlCommands.join('; ')}"`, { timeout: 300000, maxBuffer: 100 * 1024 * 1024 });
+
+      // Get row counts
+      const importedTables = [];
+      let totalRows = 0;
+      for (const table of tables) {
+        const sanitizedName = `postgres_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
+        try {
+          const { stdout } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "SELECT COUNT(*) as count FROM ${sanitizedName}"`, { timeout: 10000 });
+          const rowCount = JSON.parse(stdout.trim())[0]?.count || 0;
+          importedTables.push({ table, duckdbTable: sanitizedName, rows: rowCount });
+          totalRows += rowCount;
+          console.log(`  ✅ ${table}: ${rowCount} rows imported`);
+        } catch (e) { console.error(`  ⚠️ Could not get count for ${table}`); }
+      }
+
+      console.log(`✅ PostgreSQL import complete: ${importedTables.length} tables, ${totalRows} total rows`);
+      return { success: true, message: `Imported ${importedTables.length} tables (${totalRows} rows) from PostgreSQL`, tables: importedTables, totalRows, connectionType: 'postgresql' };
 
     } catch (error) {
       console.error('❌ PostgreSQL connection error:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 

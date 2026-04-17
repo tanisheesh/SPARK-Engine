@@ -2,6 +2,9 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron')
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 
 // Optional auto-updater (only if available)
 let autoUpdater = null;
@@ -154,6 +157,15 @@ app.whenReady().then(async () => {
     const walFile = dbFile + '.wal';
     if (fs.existsSync(walFile)) {
       fs.unlinkSync(walFile);
+    }
+
+    // Clean up csv_data directory (old SQLite/DB exported CSVs)
+    const csvDataDir = path.join(settingsDir, 'csv_data');
+    if (fs.existsSync(csvDataDir)) {
+      fs.readdirSync(csvDataDir).forEach(f => {
+        try { fs.unlinkSync(path.join(csvDataDir, f)); } catch (e) {}
+      });
+      console.log('✅ csv_data cleaned up');
     }
   } catch (cleanupError) {
     console.error('⚠️ Failed to cleanup DuckDB:', cleanupError);
@@ -485,25 +497,6 @@ ipcMain.handle('list-csv-files', () => {
       files.push(...uploadedFiles);
     }
     
-    // Get database imported files from csv_data directory
-    const csvDataDir = path.join(settingsDir, 'csv_data');
-    if (fs.existsSync(csvDataDir)) {
-      const dbFiles = fs.readdirSync(csvDataDir)
-        .filter(file => file.endsWith('.csv'))
-        .map(file => {
-          const filePath = path.join(csvDataDir, file);
-          const stats = fs.statSync(filePath);
-          return {
-            name: file,
-            path: filePath,
-            size: stats.size,
-            modified: stats.mtime,
-            isReference: false
-          };
-        });
-      files.push(...dbFiles);
-    }
-    
     // Get referenced files (large files)
     const referencesFile = path.join(settingsDir, 'file-references.json');
     if (fs.existsSync(referencesFile)) {
@@ -705,7 +698,16 @@ ipcMain.handle('connect-database', async (event, { type, config }) => {
   try {
     const DatabaseConnector = require('./database-connector');
     const connector = new DatabaseConnector();
-    
+
+    // Always wipe ALL tables before connecting - delete and recreate DuckDB file
+    try {
+      const dbFile = path.join(settingsDir, 'data.duckdb');
+      if (fs.existsSync(dbFile)) fs.unlinkSync(dbFile);
+      const walFile = dbFile + '.wal';
+      if (fs.existsSync(walFile)) fs.unlinkSync(walFile);
+      console.log('🧹 Pre-connect cleanup: DuckDB wiped for fresh start');
+    } catch (e) { console.log('⚠️ Pre-connect cleanup skipped:', e.message); }
+
     mainWindow.webContents.send('upload-progress', {
       stage: 'connecting',
       progress: 30,
