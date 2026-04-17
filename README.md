@@ -1,13 +1,14 @@
-# 🤖 SPARK ENGINE
+# ⚡ SPARK ENGINE
 
-### *Your Futuristic Voice-Enabled Data Analytics Companion*
+### *Speech Powered Analytics Relational Kit*
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.1.2-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
 [![DuckDB](https://img.shields.io/badge/DuckDB-Latest-yellow?style=for-the-badge&logo=duckdb)](https://duckdb.org/)
+[![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
-*Ask questions about your data in natural language and get intelligent voice responses*
+*Ask questions about your data in natural language and get intelligent responses — voice, text, and visual.*
 
 
 ## 🌟 Features
@@ -22,139 +23,101 @@
 - Natural voice responses with Inworld AI
 - Animated avatar while speaking
 - Text reveals as voice speaks
-- Typing animation effect
 
-### 🗄️ Any CSV Works
-- Zero configuration data loading
-- Automatic schema detection
-- Smart caching system
-- Works with any structure
+### 🗄️ Universal Data Sources
+- **CSV** — any size, even 100GB+, path-based import
+- **MySQL** — full database import via DuckDB MySQL extension
+- **PostgreSQL** — full database import via DuckDB Postgres extension
+- **SQLite** — full database import via DuckDB SQLite extension
+- Fresh DuckDB instance on every connection, automatic cleanup on disconnect
 
 ### 🧠 Self-Healing SQL
-- Intelligent query generation
-- Groq AI generates SQL
-- Auto-fixes errors (3 retries)
-- Natural language queries
+- Natural language to SQL via Groq AI (Llama 3.3 70B)
+- Auto-fixes errors with up to 3 retries
+- Schema-aware query generation per data source
 
-### 🎨 Futuristic UI
-- Beautiful dark-themed interface
-- Animated female avatar
-- Particle effects & glowing orbs
-- Fully responsive design
+### 📊 ER Diagram Visualization
+- **Auto-generated** Chen Notation and Crow's Foot diagrams
+- Works for all data sources — MySQL, PostgreSQL, SQLite, CSV
+- Real foreign key relationships from INFORMATION_SCHEMA and PRAGMA
+- Switch between notations with one click
+- Export diagrams as PNG
+- No manual drawing — connect and diagram is ready instantly
 
-### ⚡ Lightning Fast
-- Optimized performance
-- DuckDB for analytics
-- Smart caching (instant reload)
-- Turbopack compilation
+### 🔐 Authentication & Saved Prompts
+- Google OAuth via Supabase
+- Save frequently used prompts with custom titles
+- Access saved prompts from sidebar, click to auto-fill
+- Per-user data with Row Level Security
 
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js 18+ installed
-- DuckDB CLI installed ([Download](https://duckdb.org/docs/installation/))
-- A CSV file with your data
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/tanisheesh/nexus-ai.git
-cd nexus-ai
-
-# Install dependencies
-npm install
-```
-
-### Environment Setup
-
-Create `.env.local` with your API keys:
-
-```env
-# Groq API (for SQL generation)
-GROQ_API_KEY=your_groq_api_key
-
-# Deepgram API (for speech-to-text)
-DEEPGRAM_API_KEY=your_deepgram_api_key
-NEXT_PUBLIC_DEEPGRAM_API_KEY=your_deepgram_api_key
-
-# Inworld AI (for text-to-speech)
-INWORLD_WORKSPACE=your_workspace
-INWORLD_API_KEY=your_api_key
-INWORLD_API_SECRET=your_api_secret
-```
-
-### Run Development Server
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) 🎉
+### 🎨 Midnight Obsidian UI
+- Dark theme with orange (#D97706) and purple (#8B5CF6) accents
+- Particle effects and animated background
+- Developer mode with SQL debug panel
+- Fully responsive desktop layout
 
 
 ## 🛠️ Tech Stack
 
 ### Frontend
-- **Next.js 16** - React framework with Turbopack
-- **TypeScript** - Type-safe development
-- **Framer Motion** - Smooth animations
-- **Tailwind CSS v3** - Utility-first styling
+- **Next.js 16** — React framework with Turbopack
+- **TypeScript** — Type-safe development
+- **Framer Motion** — Smooth animations
+- **Tailwind CSS v3** — Utility-first styling
+- **ReactFlow** — ER diagram rendering
 
-### Backend
-- **DuckDB** - Embedded analytics database
-- **Groq AI** - SQL generation (Llama 3.3 70B)
-- **Deepgram** - Real-time speech-to-text
-- **Inworld AI** - Natural text-to-speech
+### Backend & Data
+- **Electron** — Desktop app shell
+- **DuckDB** — Embedded analytics engine (handles 100GB+ files)
+- **Groq AI** — SQL generation (Llama 3.3 70B)
+- **Deepgram** — Real-time speech-to-text
+- **Inworld AI** — Natural text-to-speech
+- **Supabase** — Auth (Google OAuth) + saved prompts storage
 
 ### Architecture
 
 ```
 ┌─────────────┐
-│   User      │
-│  (Voice)    │
+│    User     │
+│ Voice/Text  │
 └──────┬──────┘
        │
        ▼
 ┌─────────────────────────────────────┐
-│         Frontend (Next.js)          │
-│  • Voice Input (Deepgram WebSocket) │
-│  • Animated Avatar UI               │
-│  • Real-time Transcription          │
-└──────┬──────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│      Backend API Routes             │
-│  • /api/query (Main Pipeline)       │
-│  • /api/transcribe (STT)            │
-│  • /api/tts (Voice Output)          │
+│        Electron Desktop App         │
+│  • Next.js UI (static build)        │
+│  • Voice Input (Deepgram)           │
+│  • ER Diagram Visualization         │
+│  • Google Auth (Supabase)           │
 └──────┬──────────────────────────────┘
        │
        ▼
 ┌─────────────────────────────────────┐
 │         Data Pipeline               │
-│  1. CSV → DuckDB (Auto-load)        │
-│  2. Schema Detection                │
-│  3. Groq → SQL Generation           │
-│  4. DuckDB → Query Execution        │
-│  5. Groq → Natural Language         │
-│  6. Inworld AI → Voice Output       │
+│  1. Connect → DuckDB import         │
+│  2. Schema extraction               │
+│  3. Groq → SQL generation           │
+│  4. DuckDB → Query execution        │
+│  5. Groq → Natural language answer  │
+│  6. Inworld AI → Voice output       │
+└──────┬──────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│         Data Sources                │
+│  CSV │ MySQL │ PostgreSQL │ SQLite  │
 └─────────────────────────────────────┘
 ```
-## 🔧 Configuration
 
-### Smart Caching
+## 🔧 Data Connection Flow
 
-The app automatically caches loaded CSV files:
-
-- **First run**: Loads CSV into DuckDB (one-time)
-- **Subsequent runs**: Instant (uses cache)
-- **CSV changed**: Auto-detects and reloads
+- **CSV**: Select file path → Connect → DuckDB imports directly from path
+- **MySQL / PostgreSQL / SQLite**: Enter credentials → Connect → All tables imported into DuckDB
+- **Disconnect**: All tables dropped, DuckDB wiped clean
+- **App restart**: Automatic cleanup of previous session data
 
 ---
+
 ### ⭐ Star this repo if you find it useful!
 
-This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.

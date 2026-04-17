@@ -117,6 +117,15 @@ function createWindow() {
 
 // App event listeners
 app.whenReady().then(async () => {
+  // Register custom protocol for OAuth callback
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('spark-engine', process.execPath, [path.resolve(process.argv[1])]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient('spark-engine');
+  }
+
   // Enforce single instance
   const gotTheLock = app.requestSingleInstanceLock();
   
@@ -131,6 +140,19 @@ app.whenReady().then(async () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
+    }
+    // Handle OAuth callback from deep link (Windows)
+    const deepLink = commandLine.find(arg => arg.startsWith('spark-engine://'));
+    if (deepLink) {
+      mainWindow.webContents.send('oauth-callback', deepLink);
+    }
+  });
+
+  // Handle OAuth callback on macOS
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    if (mainWindow) {
+      mainWindow.webContents.send('oauth-callback', url);
     }
   });
   

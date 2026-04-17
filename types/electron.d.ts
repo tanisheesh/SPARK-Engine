@@ -20,6 +20,7 @@ declare global {
       onQueryProgress: (callback: (event: any, progress: any) => void) => void;
       onSystemNotification: (callback: (event: any, notification: any) => void) => void;
       removeAllListeners: (channel: string) => void;
+      onOAuthCallback: (callback: (event: any, url: string) => void) => void;
     };
   }
 }

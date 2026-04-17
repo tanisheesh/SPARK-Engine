@@ -35,5 +35,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSystemNotification: (callback) => ipcRenderer.on('system-notification', callback),
   
   // Remove listeners
-  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
+  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+
+  // OAuth callback
+  onOAuthCallback: (callback) => ipcRenderer.on('oauth-callback', callback),
 });

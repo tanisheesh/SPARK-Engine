@@ -5,13 +5,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SettingsModal from '../components/SettingsModal';
 import FileUpload from '../components/FileUpload';
 import VisualizationView from '../components/VisualizationView';
+import LoginScreen from '../components/LoginScreen';
+import { supabase } from '../lib/supabase';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 export default function Home() {
   const [question, setQuestion] = useState('');
   const [status, setStatus] = useState<'idle' | 'processing' | 'speaking'>('idle');
   const [response, setResponse] = useState('');
   const [displayedText, setDisplayedText] = useState('');
-  const [lastResponse, setLastResponse] = useState(''); // Store last response for replay
+  const [lastResponse, setLastResponse] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [particles, setParticles] = useState<Array<{x: number[], y: number[]}>>([]);
   const [mounted, setMounted] = useState(false);
@@ -19,6 +22,17 @@ export default function Home() {
   const [deepgramSocket, setDeepgramSocket] = useState<WebSocket | null>(null);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [silenceTimer, setSilenceTimer] = useState<NodeJS.Timeout | null>(null);
+
+  // Auth states
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Save prompt states
+  const [showSavePrompt, setShowSavePrompt] = useState(false);
+  const [saveTitle, setSaveTitle] = useState('');
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [savedPrompts, setSavedPrompts] = useState<any[]>([]);
+  const [showSavedPrompts, setShowSavedPrompts] = useState(false);
   
   // Developer Mode States
   const [isDeveloperMode, setIsDeveloperMode] = useState(false);
@@ -83,6 +97,21 @@ export default function Home() {
     
     // Check if we need to show initial setup
     checkInitialSetup();
+
+    // Auth check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+      if (session?.user) fetchSavedPrompts(session.user.id);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+      if (session?.user) fetchSavedPrompts(session.user.id);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -133,13 +162,48 @@ export default function Home() {
       if (window.electronAPI) {
         const settings = await window.electronAPI.getSettings();
         if (!settings.groqApiKey) {
-          // Show settings modal if no API key is configured
           setTimeout(() => setShowSettings(true), 1000);
         }
       }
     } catch (error) {
       console.error('Error checking initial setup:', error);
     }
+  };
+
+  const fetchSavedPrompts = async (userId: string) => {
+    const { data } = await supabase
+      .from('saved_prompts')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (data) setSavedPrompts(data);
+  };
+
+  const saveCurrentPrompt = async () => {
+    if (!user || !question.trim() || !saveTitle.trim()) return;
+    setSavingPrompt(true);
+    const { error } = await supabase.from('saved_prompts').insert({
+      user_id: user.id,
+      title: saveTitle.trim(),
+      prompt_text: question.trim()
+    });
+    if (!error) {
+      fetchSavedPrompts(user.id);
+      setShowSavePrompt(false);
+      setSaveTitle('');
+    }
+    setSavingPrompt(false);
+  };
+
+  const deletePrompt = async (id: string) => {
+    await supabase.from('saved_prompts').delete().eq('id', id);
+    setSavedPrompts(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setSavedPrompts([]);
   };
 
   const handleSettingsSave = (settings: any) => {
@@ -491,6 +555,16 @@ export default function Home() {
     }
   };
 
+  // Show loading while checking auth
+  if (authLoading) return (
+    <div className="min-h-screen bg-[#0f0a1a] flex items-center justify-center">
+      <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: '#D97706', borderTopColor: 'transparent' }} />
+    </div>
+  );
+
+  // Show login if not authenticated
+  if (!user) return <LoginScreen onLogin={() => supabase.auth.getSession().then(({ data: { session } }) => { setUser(session?.user ?? null); if (session?.user) fetchSavedPrompts(session.user.id); })} />;
+
   return (
     <div className="min-h-screen bg-[#0f0a1a] flex overflow-hidden relative">
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1a1221_1px,transparent_1px),linear-gradient(to_bottom,#1a1221_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_70%,transparent_110%)]" />
@@ -637,7 +711,89 @@ export default function Home() {
             </div>
           </button>
         </div>
+
+        {/* Bottom: Saved Prompts + User */}
+        <div className="flex flex-col gap-3 items-center mt-auto">
+          {/* Saved Prompts */}
+          <button
+            onClick={() => setShowSavedPrompts(!showSavedPrompts)}
+            className={`group relative w-12 h-12 rounded-xl transition-all duration-200 flex items-center justify-center ${
+              showSavedPrompts ? 'bg-orange-600/20 text-orange-500 border border-orange-600/30' : 'bg-slate-900/50 text-slate-400 hover:bg-slate-800/50 hover:text-orange-500'
+            }`}
+            title="Saved Prompts"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+            </svg>
+            {savedPrompts.length > 0 && (
+              <div className="absolute -right-1 -top-1 w-4 h-4 bg-orange-500 rounded-full text-white text-xs flex items-center justify-center font-bold">
+                {savedPrompts.length > 9 ? '9+' : savedPrompts.length}
+              </div>
+            )}
+            <div className="absolute left-full ml-3 px-3 py-2 bg-slate-900 border border-orange-600/30 rounded-lg text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+              Saved Prompts ({savedPrompts.length})
+            </div>
+          </button>
+
+          {/* User Avatar + Logout */}
+          <button
+            onClick={handleLogout}
+            className="group relative w-12 h-12 rounded-xl overflow-hidden border-2 transition-all duration-200 hover:border-red-500/50"
+            style={{ borderColor: '#D97706' }}
+            title="Logout"
+          >
+            {user?.user_metadata?.avatar_url ? (
+              <img src={user.user_metadata.avatar_url} alt="User" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-orange-500 font-bold text-lg" style={{ background: 'rgba(217,119,6,0.15)' }}>
+                {user?.email?.[0]?.toUpperCase() || 'U'}
+              </div>
+            )}
+            <div className="absolute inset-0 bg-red-500/80 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </div>
+            <div className="absolute left-full ml-3 px-3 py-2 bg-slate-900 border border-red-500/30 rounded-lg text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap text-red-400">
+              Logout ({user?.email?.split('@')[0]})
+            </div>
+          </button>
+        </div>
       </motion.div>
+
+      {/* Saved Prompts Panel */}
+      <AnimatePresence>
+        {showSavedPrompts && (
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="fixed left-16 top-0 h-full w-72 z-20 border-r overflow-y-auto"
+            style={{ background: 'rgba(15,10,26,0.98)', borderColor: 'rgba(217,119,6,0.2)' }}
+          >
+            <div className="p-4 border-b" style={{ borderColor: 'rgba(217,119,6,0.2)' }}>
+              <h3 className="font-mono font-bold text-sm" style={{ color: '#F59E0B' }}>📌 SAVED PROMPTS</h3>
+            </div>
+            <div className="p-3 flex flex-col gap-2">
+              {savedPrompts.length === 0 ? (
+                <p className="text-xs text-center py-8 font-mono" style={{ color: '#6B7280' }}>No saved prompts yet</p>
+              ) : savedPrompts.map(prompt => (
+                <div key={prompt.id}
+                  className="group flex items-start justify-between p-3 rounded-lg border cursor-pointer transition-all"
+                  style={{ background: 'rgba(217,119,6,0.05)', borderColor: 'rgba(217,119,6,0.2)' }}
+                  onClick={() => { setQuestion(prompt.prompt_text); setShowSavedPrompts(false); }}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-mono font-semibold truncate" style={{ color: '#F59E0B' }}>{prompt.title}</p>
+                    <p className="text-xs truncate mt-0.5" style={{ color: '#9CA3AF' }}>{prompt.prompt_text}</p>
+                  </div>
+                  <button onClick={e => { e.stopPropagation(); deletePrompt(prompt.id); }}
+                    className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{ color: '#EF4444' }}>✕</button>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Content Area */}
       <div className="flex-1 ml-16 flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden relative">
@@ -717,15 +873,68 @@ export default function Home() {
                   </svg>
                 </button>
               </div>
-              <motion.button 
-                type="submit" 
-                disabled={isProcessing || !question.trim() || isListening} 
-                whileHover={{ scale: 1.05 }} 
-                whileTap={{ scale: 0.95 }} 
-                className="w-full sm:w-auto px-6 sm:px-8 py-3 bg-gradient-to-r from-orange-600 to-purple-600 rounded-2xl text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-orange-600/50 whitespace-nowrap"
-              >
-                {isProcessing ? '◉ PROCESSING' : '▶ EXECUTE'}
-              </motion.button>
+              <div className="flex gap-2">
+                {/* Save Prompt Button */}
+                {question.trim() && (
+                  <motion.button
+                    type="button"
+                    onClick={() => setShowSavePrompt(true)}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="px-4 py-3 rounded-2xl font-bold text-sm border transition-all"
+                    style={{ background: 'rgba(217,119,6,0.1)', borderColor: 'rgba(217,119,6,0.3)', color: '#F59E0B' }}
+                    title="Save this prompt"
+                  >
+                    💾
+                  </motion.button>
+                )}
+                <motion.button 
+                  type="submit" 
+                  disabled={isProcessing || !question.trim() || isListening} 
+                  whileHover={{ scale: 1.05 }} 
+                  whileTap={{ scale: 0.95 }} 
+                  className="flex-1 sm:flex-none px-6 sm:px-8 py-3 bg-gradient-to-r from-orange-600 to-purple-600 rounded-2xl text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-orange-600/50 whitespace-nowrap"
+                >
+                  {isProcessing ? '◉ PROCESSING' : '▶ EXECUTE'}
+                </motion.button>
+              </div>
+
+              {/* Save Prompt Modal */}
+              <AnimatePresence>
+                {showSavePrompt && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute bottom-full mb-3 left-0 right-0 p-4 rounded-2xl border z-50"
+                    style={{ background: 'rgba(15,10,26,0.98)', borderColor: 'rgba(217,119,6,0.3)' }}
+                  >
+                    <p className="text-xs font-mono mb-2" style={{ color: '#F59E0B' }}>💾 Save Prompt</p>
+                    <input
+                      type="text"
+                      value={saveTitle}
+                      onChange={e => setSaveTitle(e.target.value)}
+                      placeholder="Give it a title..."
+                      className="w-full px-3 py-2 rounded-xl text-sm font-mono mb-2 focus:outline-none"
+                      style={{ background: 'rgba(217,119,6,0.1)', border: '1px solid rgba(217,119,6,0.3)', color: '#fff' }}
+                      onKeyDown={e => { if (e.key === 'Enter') saveCurrentPrompt(); if (e.key === 'Escape') setShowSavePrompt(false); }}
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={saveCurrentPrompt} disabled={!saveTitle.trim() || savingPrompt}
+                        className="flex-1 py-1.5 rounded-lg text-xs font-mono font-bold disabled:opacity-50"
+                        style={{ background: 'rgba(217,119,6,0.2)', color: '#F59E0B', border: '1px solid rgba(217,119,6,0.3)' }}>
+                        {savingPrompt ? 'Saving...' : 'Save'}
+                      </button>
+                      <button onClick={() => { setShowSavePrompt(false); setSaveTitle(''); }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-mono"
+                        style={{ background: 'rgba(100,100,100,0.2)', color: '#9CA3AF' }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </motion.form>
