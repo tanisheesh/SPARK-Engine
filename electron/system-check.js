@@ -149,11 +149,22 @@ function showSystemCheckSplash() {
   });
 
   // Get the icon path and convert to base64
-  const iconPath = path.join(__dirname, '../public/icon.png');
+  // In production, icon is in extraResources; in dev it's in public/
   let iconBase64 = '';
   try {
-    const iconBuffer = fs.readFileSync(iconPath);
-    iconBase64 = `data:image/png;base64,${iconBuffer.toString('base64')}`;
+    const { app } = require('electron');
+    const possiblePaths = [
+      path.join(process.resourcesPath, 'icon.png'),           // production extraResources
+      path.join(__dirname, '../public/icon.png'),              // dev
+      path.join(app.getAppPath(), 'public/icon.png'),          // packaged app
+    ];
+    for (const iconPath of possiblePaths) {
+      if (fs.existsSync(iconPath)) {
+        const iconBuffer = fs.readFileSync(iconPath);
+        iconBase64 = `data:image/png;base64,${iconBuffer.toString('base64')}`;
+        break;
+      }
+    }
   } catch (error) {
     console.error('Failed to load icon:', error);
   }

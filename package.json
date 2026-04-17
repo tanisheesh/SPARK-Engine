@@ -97,8 +97,7 @@
       "shortcutName": "SPARK Engine",
       "differentialPackage": false,
       "packElevateHelper": true,
-      "uninstallDisplayName": "SPARK Engine - Voice Analytics Platform",
-      "include": "installer.nsh"
+      "uninstallDisplayName": "SPARK Engine - Voice Analytics Platform"
     },
     "mac": {
       "category": "public.app-category.productivity",
