@@ -2,7 +2,7 @@
 
 ### *Speech Powered Analytics Relational Kit*
 
-[![Next.js](https://img.shields.io/badge/Next.js-16.1.2-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
 [![DuckDB](https://img.shields.io/badge/DuckDB-Latest-yellow?style=for-the-badge&logo=duckdb)](https://duckdb.org/)
 [![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
