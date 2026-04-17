@@ -6,7 +6,6 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
 [![DuckDB](https://img.shields.io/badge/DuckDB-Latest-yellow?style=for-the-badge&logo=duckdb)](https://duckdb.org/)
 [![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 *Ask questions about your data in natural language and get intelligent responses — voice, text, and visual.*
 
@@ -120,4 +119,4 @@
 
 ### ⭐ Star this repo if you find it useful!
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
