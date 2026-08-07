@@ -1,122 +1,89 @@
-# ⚡ SPARK ENGINE
+<p align="center">
+  <img src="public/icon.png" alt="SPARK Engine Logo" width="96" height="96">
+</p>
 
-### *Speech Powered Analytics Relational Kit*
+<h1 align="center">SPARK Engine</h1>
 
-[![Next.js](https://img.shields.io/badge/Next.js-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
-[![DuckDB](https://img.shields.io/badge/DuckDB-yellow?style=for-the-badge&logo=duckdb)](https://duckdb.org/)
-[![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
+<p align="center">
+  <strong>Speech Powered Analytics Relational Kit — ask your database anything, out loud.</strong>
+</p>
 
-*Ask questions about your data in natural language and get intelligent responses — voice, text, and visual.*
-
-
-## 🌟 Features
-
-### 🎤 Voice Input
-- Real-time speech-to-text with Deepgram WebSocket
-- Auto-stop on silence detection
-- Live transcription as you speak
-- No manual stop needed
-
-### 🔊 Voice Output
-- Natural voice responses with Inworld AI
-- Animated avatar while speaking
-- Text reveals as voice speaks
-
-### 🗄️ Universal Data Sources
-- **CSV** — any size, even 100GB+, path-based import
-- **MySQL** — full database import via DuckDB MySQL extension
-- **PostgreSQL** — full database import via DuckDB Postgres extension
-- **SQLite** — full database import via DuckDB SQLite extension
-- Fresh DuckDB instance on every connection, automatic cleanup on disconnect
-
-### 🧠 Self-Healing SQL
-- Natural language to SQL via Groq AI (Llama 3.3 70B)
-- Auto-fixes errors with up to 3 retries
-- Schema-aware query generation per data source
-
-### 📊 ER Diagram Visualization
-- **Auto-generated** Chen Notation and Crow's Foot diagrams
-- Works for all data sources — MySQL, PostgreSQL, SQLite, CSV
-- Real foreign key relationships from INFORMATION_SCHEMA and PRAGMA
-- Switch between notations with one click
-- Export diagrams as PNG
-- No manual drawing — connect and diagram is ready instantly
-
-### 🔐 Authentication & Saved Prompts
-- Google OAuth via Supabase
-- Save frequently used prompts with custom titles
-- Access saved prompts from sidebar, click to auto-fill
-- Per-user data with Row Level Security
-
-### 🎨 Midnight Obsidian UI
-- Dark theme with orange (#D97706) and purple (#8B5CF6) accents
-- Particle effects and animated background
-- Developer mode with SQL debug panel
-- Fully responsive desktop layout
-
-
-## 🛠️ Tech Stack
-
-### Frontend
-- **Next.js 16** — React framework with Turbopack
-- **TypeScript** — Type-safe development
-- **Framer Motion** — Smooth animations
-- **Tailwind CSS v3** — Utility-first styling
-- **ReactFlow** — ER diagram rendering
-
-### Backend & Data
-- **Electron** — Desktop app shell
-- **DuckDB** — Embedded analytics engine (handles 100GB+ files)
-- **Groq AI** — SQL generation (Llama 3.3 70B)
-- **Deepgram** — Real-time speech-to-text
-- **Inworld AI** — Natural text-to-speech
-- **Supabase** — Auth (Google OAuth) + saved prompts storage
-
-### Architecture
-
-```
-┌─────────────┐
-│    User     │
-│ Voice/Text  │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│        Electron Desktop App         │
-│  • Next.js UI (static build)        │
-│  • Voice Input (Deepgram)           │
-│  • ER Diagram Visualization         │
-│  • Google Auth (Supabase)           │
-└──────┬──────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│         Data Pipeline               │
-│  1. Connect → DuckDB import         │
-│  2. Schema extraction               │
-│  3. Groq → SQL generation           │
-│  4. DuckDB → Query execution        │
-│  5. Groq → Natural language answer  │
-│  6. Inworld AI → Voice output       │
-└──────┬──────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│         Data Sources                │
-│  CSV │ MySQL │ PostgreSQL │ SQLite  │
-└─────────────────────────────────────┘
-```
-
-## 🔧 Data Connection Flow
-
-- **CSV**: Select file path → Connect → DuckDB imports directly from path
-- **MySQL / PostgreSQL / SQLite**: Enter credentials → Connect → All tables imported into DuckDB
-- **Disconnect**: All tables dropped, DuckDB wiped clean
-- **App restart**: Automatic cleanup of previous session data
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-black?style=flat-square&logo=next.js" alt="Next.js">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Electron-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron">
+  <img src="https://img.shields.io/badge/DuckDB-FFF000?style=flat-square&logo=duckdb&logoColor=black" alt="DuckDB">
+  <img src="https://img.shields.io/badge/Groq-F55036?style=flat-square" alt="Groq">
+  <img src="https://img.shields.io/badge/Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white" alt="Supabase">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-D97706?style=flat-square" alt="License">
+</p>
 
 ---
 
-### ⭐ Star this repo if you find it useful!
+## What is SPARK Engine?
 
-This project is licensed under the **GNU General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
+SPARK Engine is a voice-first data analytics desktop app that lets you interrogate any database — CSV, MySQL, PostgreSQL, or SQLite — using plain English spoken aloud or typed. You connect your data source, ask a question, and SPARK generates a SQL query via Groq AI, executes it against a local DuckDB instance, and reads the answer back to you through Inworld AI voice synthesis. It also auto-generates interactive ER diagrams in Chen and Crow's Foot notation the moment you connect, with no manual drawing required.
+
+---
+
+## What you get
+
+- **Voice-to-SQL pipeline** — Speak a question; Deepgram transcribes it in real time, Groq (Llama 3.3-70B) writes the SQL, DuckDB runs it, and Inworld AI reads the answer back.
+- **Universal data sources** — Connect CSV files of any size (100 GB+), MySQL, PostgreSQL, or SQLite; all data is imported into a fresh DuckDB instance and wiped clean on disconnect.
+- **Self-healing SQL** — If the generated query fails, the engine automatically retries with the error context, up to 3 attempts, before surfacing a clear message.
+- **Instant ER diagrams** — Real foreign-key relationships are extracted from `INFORMATION_SCHEMA` / `PRAGMA` and rendered as interactive Chen or Crow's Foot diagrams via ReactFlow; export as PNG.
+- **Developer debug panel** — Toggle to see the generated SQL, raw DuckDB results, processing pipeline steps, and the AI-formatted response side by side.
+
+---
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| Desktop shell | Electron 32 |
+| UI framework | Next.js 16 (App Router, TypeScript, static build) |
+| Styling | Tailwind CSS v3 · Framer Motion |
+| ER diagrams | ReactFlow 11 · Dagre (auto-layout) |
+| Analytics engine | DuckDB (embedded, via CLI) |
+| AI — SQL generation | Groq API · Llama 3.3-70B |
+| Voice input | Deepgram WebSocket (nova-2 model) |
+| Voice output | Inworld AI TTS (inworld-tts-1.5-max) |
+| Auth | Supabase — Google OAuth |
+| Saved prompts | Supabase Postgres (Row Level Security) |
+| DB connectors | mysql2 · pg · better-sqlite3 |
+
+---
+
+## Engineering Decisions
+
+**Why DuckDB over running queries directly against MySQL/PostgreSQL?**
+Pulling all data into a local DuckDB instance gives a single query surface regardless of source type — CSV, MySQL, PostgreSQL, and SQLite all become DuckDB tables. This means the SQL generation prompt only needs to know one dialect, and the query executor path is identical for every source.
+
+**Why Groq (Llama 3.3-70B) over a hosted OpenAI model?**
+Groq's inference is significantly faster at lower latency, which matters in a real-time voice pipeline where the user is waiting to hear an answer spoken aloud. The trade-off is that the API key is user-managed (entered in the settings modal), which avoids running a backend service.
+
+**Why Electron over a web app?**
+DuckDB's CLI needs filesystem access to the `.duckdb` database file, and large CSV files (100 GB+) are referenced by path rather than copied. Both requirements demand native OS access that a browser sandbox cannot provide.
+
+**Why fresh DuckDB instance per session?**
+The database file is wiped on every app start and on every disconnect. This eliminates stale state, prevents cross-session table leakage, and keeps the schema context fed to the LLM accurate without any synchronisation logic.
+
+**What would you do differently in v2?**
+Use the DuckDB Node.js bindings (`@duckdb/node-api`) instead of shelling out to a CLI binary — it would eliminate the subprocess overhead, enable streaming result sets, and remove the awkward SQL string escaping that the current approach requires.
+
+---
+
+## Docs
+
+| Document | Description |
+|---|---|
+| [PRD](docs/PRD.md) | Product requirements — goals, user stories, non-goals |
+| [Architecture](docs/ARCHITECTURE.md) | System design, data flow, component breakdown |
+| [Decisions](docs/DECISIONS.md) | Every major technical decision and why |
+| [Setup](docs/SETUP.md) | Local dev setup, env vars, building the installer |
+
+---
+
+## Author
+
+**Tanish Poddar** — [tanisheesh.in](https://tanisheesh.in) · [LinkedIn](https://linkedin.com/in/tanisheesh) · [GitHub](https://github.com/tanisheesh)
