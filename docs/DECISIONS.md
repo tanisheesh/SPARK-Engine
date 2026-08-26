@@ -1,89 +1,81 @@
 # Engineering Decisions — SPARK Engine
 
-<!--
-This is not user documentation. This is for technical interviewers
-and senior engineers who want to understand WHY the system is built
-the way it is.
--->
+Every decision here follows the same format: what the situation was, what I chose, why I chose it, and what I gave up. This is the reasoning I'd walk through with a technical interviewer or a stakeholder asking "why is it built this way?"
 
 ---
 
-## Decision 1 — Import all data into DuckDB rather than querying sources directly
+## Decision 1 — Import all data into DuckDB rather than querying source databases directly
 
-**Context:** When a user connects a MySQL or PostgreSQL database, we need to run LLM-generated SQL against it. The options were: (a) pass the generated SQL directly to the source database, or (b) import all data into a local DuckDB instance first.
+**The situation:** When a user connects a MySQL or PostgreSQL database, the app needs to run AI-generated SQL against it. I had two options: send the generated SQL directly to MySQL/PostgreSQL, or first import everything into a local DuckDB instance and query from there.
 
-**Decision:** Import into DuckDB using DuckDB's first-party extensions (`ATTACH ... TYPE mysql/postgres/sqlite`), then run all queries against the local DuckDB file.
+**What I chose:** Import all data into local DuckDB first, then run every query against DuckDB — regardless of whether the original source is CSV, MySQL, PostgreSQL, or SQLite.
 
-**Reason:** A single query surface means the SQL generation prompt needs to know only one dialect (DuckDB, which is very close to standard SQL). Groq never has to know whether the source is MySQL 5.7 or PostgreSQL 15. It also means schema extraction, sample data fetching, and query execution all use the same code path regardless of source type. DuckDB's columnar engine also handles large CSV files (100 GB+) that would be impractical to send across a network connection to a remote database.
+**Why:** This decision solved three problems at once. First, the AI only needs to know one SQL dialect (DuckDB, which is close to standard SQL) — it doesn't need to know whether the source is MySQL 5.7 or PostgreSQL 15, which would require separate prompts and increase failure modes. Second, all query logic — schema extraction, sample data fetching, execution — is identical code regardless of source type. Third, large CSV files (100 GB+) can be queried locally without sending them over a network.
 
-**Tradeoff:** The import step can be slow for large databases (minutes for multi-million-row tables). The data in DuckDB is a snapshot — live changes in the source are invisible until the user reconnects. For read-only analytics use cases this is acceptable; for operational queries against a live OLTP database it is not.
+From a stakeholder perspective: a user connecting their production MySQL database never has raw AI-generated SQL running against their live database. Every query hits a local read-only copy — which is a meaningful data safety guarantee.
 
----
-
-## Decision 2 — DuckDB via CLI subprocess, not Node.js bindings
-
-**Context:** DuckDB has both a CLI binary and a `@duckdb/node-api` Node.js package. Electron's native module rebuild process (`electron-builder install-app-deps`) with native addons is notoriously brittle across platforms and Node/Electron version pairs.
-
-**Decision:** Use the DuckDB CLI binary, spawned as a child process from the Electron main process, with results piped as JSON (`-json` flag).
-
-**Reason:** The CLI binary is a self-contained executable with no native addon rebuild required. electron-builder can bundle it as an extraResource and auto-install it on first run. This eliminated a class of `MODULE_NOT_FOUND` and ABI mismatch errors during packaging for Windows, macOS, and Linux in the same build.
-
-**Tradeoff:** Each query spawns a subprocess, which adds ~100–300 ms overhead and requires SQL to be serialised as a shell argument (with careful escaping). Streaming large result sets is not possible — the entire JSON result is buffered in memory before being returned to the renderer. For queries returning more than 100 000 rows this becomes a memory concern; the current implementation caps results at 100 rows returned to the UI.
+**What I gave up:** The local DuckDB is a snapshot, not a live mirror. If someone updates the source database, SPARK won't see those changes until the user reconnects. For read-only analytics use cases this is fine. For operational queries against a live OLTP database, it would not be appropriate.
 
 ---
 
-## Decision 3 — Two separate Groq calls per query (SQL generation + response formatting)
+## Decision 2 — Use DuckDB via CLI subprocess, not the Node.js bindings
 
-**Context:** We need to go from a natural language question to a spoken answer. The options were: (a) one LLM call that outputs both SQL and a prose response, or (b) two separate calls — one for SQL, one for formatting.
+**The situation:** DuckDB has two ways to use it from Node.js/Electron: a CLI binary you spawn as a child process, or the official `@duckdb/node-api` package that links natively. Electron's native module rebuild process with native addons is known to be unreliable across platform and version combinations.
 
-**Decision:** Two calls: first call generates only SQL (temperature 0.1); second call receives the question, SQL, and query results and generates the prose response.
+**What I chose:** Spawn the DuckDB CLI binary as a subprocess from the Electron main process, pipe results as JSON using the `-json` flag.
 
-**Reason:** Asking a single model to simultaneously reason about SQL syntax and write conversational prose in one output degrades accuracy on both dimensions. Separating concerns lets the SQL call be constrained with strict rules (SELECT-only, LIMIT required, no markdown) while the formatting call can be given a different system prompt focused purely on clarity and tone. The SQL call uses `temperature: 0.1` to maximise determinism.
+**Why:** The CLI binary is a self-contained executable — electron-builder can bundle it as an extra resource and ship it inside the installer. This eliminated an entire class of packaging failures (MODULE_NOT_FOUND, ABI mismatch errors) that would have made it impossible to ship a working installer on Windows, macOS, and Linux from the same build configuration. Shipping a working installer was a hard requirement for this to function as a portfolio piece.
 
-**Tradeoff:** Two API round trips per query add latency (roughly 1–3 seconds combined on Groq's free tier). If Groq is rate-limited, both calls can fail independently. An alternative would be a structured output schema with both SQL and prose in one response, but this requires a model that reliably produces valid JSON with embedded SQL — which was less reliable in testing.
-
----
-
-## Decision 4 — Fresh DuckDB instance on every app start and every database connect
-
-**Context:** DuckDB stores its state in a persistent `.duckdb` file in AppData. Between sessions, the file might contain tables from a different database connection, or be in an inconsistent state from a previous crash.
-
-**Decision:** Delete the entire `.duckdb` file on app startup and before every `connect-database` call.
-
-**Reason:** Guaranteed clean state eliminates an entire category of bugs: stale tables from a previous session appearing in schema context (causing the LLM to reference tables that don't exist in the current source), corrupted WAL files blocking new connections, and table name collisions when reconnecting to the same database after modifying the source schema. The cost is negligible — DuckDB creates a new file in milliseconds.
-
-**Tradeoff:** Any uncommitted work or temporary views created during a session are lost on restart or reconnect. For an analytics read-only tool this is acceptable. It would not be acceptable for a use case requiring persistent computed tables or materialised views between sessions.
+**What I gave up:** Each query spawns a subprocess, adding 100–300ms overhead. Large result sets are fully buffered before being returned to the UI — streaming is not possible. SQL must be serialised carefully as a shell argument, which requires escaping. This is the decision I would reverse first in v2 by switching to `@duckdb/node-api`.
 
 ---
 
-## Decision 5 — Voice input via Deepgram WebSocket opened from the renderer, not the main process
+## Decision 3 — Two separate AI calls per query: one for SQL, one for the response
 
-**Context:** Deepgram requires a WebSocket connection that streams audio chunks in real time. The connection could be opened from either the Electron main process (Node.js) or the renderer process (browser context).
+**The situation:** To go from a user's spoken question to a natural language answer, I needed the AI to both generate SQL and explain the results conversationally. I could do this in one call or two.
 
-**Decision:** Open the Deepgram WebSocket directly from the renderer using the browser's native WebSocket API and `navigator.mediaDevices.getUserMedia`.
+**What I chose:** Two calls — the first generates only SQL (strict rules, low temperature), the second receives the question, SQL, and query results and writes a conversational prose response.
 
-**Reason:** The renderer already has access to `getUserMedia` for microphone capture and native WebSocket for streaming. Routing audio through IPC to the main process would add unnecessary serialisation overhead and latency for real-time transcription. The Deepgram API key is retrieved from settings before the connection is opened, so it is not hardcoded in the frontend bundle.
+**Why:** Asking a single model call to simultaneously reason about SQL syntax and write natural, conversational prose degrades accuracy on both. Separating them lets me give each call a focused system prompt: the SQL call has strict rules (SELECT-only, always add LIMIT, cast numeric columns before LIKE), while the formatting call has a completely different instruction set focused on clarity and tone. This produced noticeably more accurate SQL and more natural responses than a single-call approach in testing.
 
-**Tradeoff:** The Deepgram API key is accessible in the renderer process's memory while the WebSocket is open. A compromised renderer (e.g. via XSS through user-controlled data rendered without sanitisation) could read the key. The current app does not render any untrusted HTML, and Electron's `contextIsolation: true` limits the blast radius of renderer compromise, but this is the weakest link in the key-management model.
+From a consulting perspective, this is the same principle as separating analysis from communication — you do the technical work precisely first, then translate for the audience.
 
----
-
-## What I'd do differently in v2
-
-- **Replace DuckDB CLI with `@duckdb/node-api`** — The subprocess model works but is fragile. The official Node.js bindings would eliminate shell argument escaping, enable streaming result sets, and give proper async error handling.
-- **Add a retry loop with error feedback to Groq** — If DuckDB rejects the generated SQL, re-prompt Groq with the SQL and the error message. The current implementation surfaces the error to the user; a retry with error context would fix most common failures automatically.
-- **Store Deepgram key in main process only** — Retrieve the key in main, open the WebSocket from main via a helper, and stream transcripts back to the renderer via IPC. This keeps the key out of renderer memory entirely.
-- **Persist a query history table in Supabase** — Even a simple log of `{ question, sql, timestamp }` would be valuable for users who want to audit or replay past queries.
-- **Add nonce-based CSP** — The current Content-Security-Policy is permissive enough to allow Electron to load the static build. A stricter policy with nonces on inline scripts would harden against any future XSS surface.
+**What I gave up:** Two API round trips per query add 1–3 seconds of latency on Groq's free tier. If the API is rate-limited, either call can fail independently.
 
 ---
 
-## Explicit non-decisions (deferred to v2)
+## Decision 4 — Wipe the DuckDB file on every startup and every reconnect
 
-| Feature | Why deferred |
-|---|---|
-| Write operations (INSERT/UPDATE/DELETE) | Analytics read-only scope keeps the permission model simple and prevents accidental data modification via LLM-generated SQL |
-| Streaming query results from DuckDB | Requires `@duckdb/node-api` Node.js bindings — native addon rebuild complexity was the blocking issue for v1 |
-| Real-time source database sync | Full-import-on-connect is simpler to reason about and sufficient for analytical (not operational) use cases |
-| Local LLM support (Ollama) | Groq's hosted Llama is fast enough and eliminates the GPU/VRAM requirement for the end user |
-| Multi-tenant cloud deployment | Single-user desktop scope; a cloud version would require a backend service, per-user DuckDB isolation, and billing |
+**The situation:** DuckDB stores state in a persistent file. Between sessions, that file might contain tables from a completely different database connection, or be in a broken state from a previous crash.
+
+**What I chose:** Delete the entire `.duckdb` file on app startup and before every new database connection.
+
+**Why:** This guarantees a clean slate every time. The alternative — trying to detect and clean up stale tables programmatically — introduces its own complexity and failure modes. If the schema context fed to the AI ever contains tables that don't exist in the current data source, the AI will generate SQL that fails. A wipe-on-start eliminates that entire category of silent correctness bugs. DuckDB creates a new file in milliseconds, so the cost is negligible.
+
+This is a risk mitigation decision: the cost of wiping (losing session-temporary state) is low, and the cost of not wiping (AI referencing wrong tables, confusing errors for the user) is high.
+
+**What I gave up:** Any work done in a session — temporary views, computed tables — is lost on restart or reconnect. For an analytics read-only tool this is acceptable.
+
+---
+
+## Decision 5 — Open the Deepgram WebSocket from the renderer, not the Electron main process
+
+**The situation:** Deepgram needs a WebSocket connection that streams real-time audio chunks from the microphone. The connection could be opened from either the Electron main process (Node.js) or the renderer (browser context).
+
+**What I chose:** Open the Deepgram WebSocket directly from the renderer using the browser's native WebSocket API and `navigator.mediaDevices.getUserMedia`.
+
+**Why:** The renderer already has native access to both the microphone (via `getUserMedia`) and real-time WebSocket communication. Routing audio chunks through Electron IPC to the main process would add serialisation overhead and latency that would visibly degrade the real-time transcription experience. The API key is loaded from settings before the connection is opened, so it is not hardcoded anywhere in the bundle.
+
+**What I gave up:** The Deepgram API key exists in renderer memory while the WebSocket is open. A future v2 improvement would be to open the WebSocket from the main process and pipe only the transcript text back to the renderer — keeping the key entirely out of renderer memory.
+
+---
+
+## What I'd change in v2
+
+**Replace DuckDB CLI with the Node.js bindings** — the subprocess model works but adds overhead and requires careful string escaping. The official `@duckdb/node-api` bindings would enable streaming results, lower latency, and proper async error handling.
+
+**Add a retry loop with error feedback** — if DuckDB rejects the generated SQL, re-prompt the AI with the SQL and the error message. Currently the error is surfaced to the user; a retry with error context would resolve most failures automatically without user intervention.
+
+**Azure AD / Entra ID auth** — the current Google OAuth via Supabase is sufficient for personal use, but enterprise clients would require SSO integration. This would also unlock role-based access controls for saved prompts and query history.
+
+**Persist query history in Supabase** — even a simple log of `{ question, sql, timestamp }` would let users audit or replay past analyses, which is a common requirement in enterprise analytics workflows.

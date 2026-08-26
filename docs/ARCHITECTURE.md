@@ -18,7 +18,7 @@ to build it, debug it, or extend it.
 | Styling | Tailwind CSS v3 · Framer Motion 12 |
 | ER diagrams | ReactFlow 11 · Dagre (auto-layout) |
 | Analytics engine | DuckDB (embedded CLI binary, auto-downloaded on first run) |
-| AI — SQL + NL | Groq API · Llama 3.3-70B-Versatile |
+| AI — SQL + NL | Groq API · Qwen 3 27B |
 | Voice input | Deepgram WebSocket API (nova-2 model) |
 | Voice output | Inworld AI TTS (inworld-tts-1.5-max, Dennis voice) |
 | Auth | Supabase — Google OAuth via `@supabase/supabase-js` |
@@ -135,7 +135,7 @@ SPARK Engine has no application-owned database schema. All query data lives in a
 
 ### Input
 
-Two separate Groq calls per query. Both use `llama-3.3-70b-versatile` at `temperature: 0.1`.
+Two separate Groq calls per query. Both use `qwen/qwen3.8-27b` at `temperature: 0.1`.
 
 **SQL generation call:** System prompt includes all table names with column names and types (`column_name (data_type)`), plus 3 sample rows from the first table. User message is the raw question.
 

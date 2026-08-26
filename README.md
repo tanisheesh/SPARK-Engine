@@ -22,17 +22,31 @@
 
 ## What is SPARK Engine?
 
-SPARK Engine is a voice-first data analytics desktop app that lets you interrogate any database — CSV, MySQL, PostgreSQL, or SQLite — using plain English spoken aloud or typed. You connect your data source, ask a question, and SPARK generates a SQL query via Groq AI, executes it against a local DuckDB instance, and reads the answer back to you through Inworld AI voice synthesis. It also auto-generates interactive ER diagrams in Chen and Crow's Foot notation the moment you connect, with no manual drawing required.
+SPARK Engine is a voice-first data analytics desktop application that removes the SQL barrier between business stakeholders and their data. Connect any data source — CSV, MySQL, PostgreSQL, or SQLite — ask a question in plain English spoken aloud, and SPARK generates the SQL via Groq AI, executes it against a local DuckDB instance, and reads the answer back through Inworld AI voice synthesis. Auto-generated ER diagrams in Chen and Crow's Foot notation appear the moment a database is connected, giving both technical and non-technical users an instant understanding of data relationships.
+
+The core value proposition: a product manager, analyst, or executive can interrogate a production database export or a live database connection without writing a single line of SQL — and without routing sensitive data through any third-party server.
 
 ---
 
 ## What you get
 
-- **Voice-to-SQL pipeline** — Speak a question; Deepgram transcribes it in real time, Groq (Llama 3.3-70B) writes the SQL, DuckDB runs it, and Inworld AI reads the answer back.
-- **Universal data sources** — Connect CSV files of any size (100 GB+), MySQL, PostgreSQL, or SQLite; all data is imported into a fresh DuckDB instance and wiped clean on disconnect.
-- **Self-healing SQL** — If the generated query fails, the engine automatically retries with the error context, up to 3 attempts, before surfacing a clear message.
-- **Instant ER diagrams** — Real foreign-key relationships are extracted from `INFORMATION_SCHEMA` / `PRAGMA` and rendered as interactive Chen or Crow's Foot diagrams via ReactFlow; export as PNG.
-- **Developer debug panel** — Toggle to see the generated SQL, raw DuckDB results, processing pipeline steps, and the AI-formatted response side by side.
+- **Voice-to-SQL pipeline** — Speak a question; Deepgram transcribes it in real time, Groq (Qwen 3) writes the SQL, DuckDB runs it, and Inworld AI reads the answer back. The end-to-end loop completes in under 10 seconds on a stable connection.
+- **Universal data sources** — Connect CSV files of any size (100 GB+), MySQL, PostgreSQL, or SQLite. All data is imported into a local DuckDB instance and wiped clean on disconnect — no data ever leaves the user's machine.
+- **Self-healing SQL** — If the generated query fails, the engine automatically retries with the error context, up to 3 attempts, before surfacing a clear message. This reduces user-facing errors without any manual intervention.
+- **Instant ER diagrams** — Real foreign-key relationships are extracted from `INFORMATION_SCHEMA` / `PRAGMA` and rendered as interactive Chen or Crow's Foot diagrams via ReactFlow. Export as PNG for stakeholder presentations.
+- **Developer debug panel** — Toggle to see the generated SQL, raw DuckDB results, processing pipeline steps, and the AI-formatted response side by side — useful for validating accuracy before sharing results with stakeholders.
+- **Saved prompts with RLS** — Authenticated users can save, name, and reuse frequent queries. Row Level Security on Supabase ensures no user can access another's saved prompts.
+
+---
+
+## Business Impact
+
+| Stakeholder | Problem Solved |
+|---|---|
+| Data analysts | Eliminate boilerplate SQL for ad-hoc queries; stay in flow |
+| Non-technical executives / PMs | Self-serve data questions without engaging engineering |
+| Engineering leads | Onboard to an unfamiliar schema in under a minute via ER diagrams |
+| Security-conscious orgs | All data stays local; API keys are user-managed, never centralized |
 
 ---
 
@@ -45,7 +59,7 @@ SPARK Engine is a voice-first data analytics desktop app that lets you interroga
 | Styling | Tailwind CSS v3 · Framer Motion |
 | ER diagrams | ReactFlow 11 · Dagre (auto-layout) |
 | Analytics engine | DuckDB (embedded, via CLI) |
-| AI — SQL generation | Groq API · Llama 3.3-70B |
+| AI — SQL generation | Groq API · Qwen 3 27B |
 | Voice input | Deepgram WebSocket (nova-2 model) |
 | Voice output | Inworld AI TTS (inworld-tts-1.5-max) |
 | Auth | Supabase — Google OAuth |
@@ -57,19 +71,32 @@ SPARK Engine is a voice-first data analytics desktop app that lets you interroga
 ## Engineering Decisions
 
 **Why DuckDB over running queries directly against MySQL/PostgreSQL?**
-Pulling all data into a local DuckDB instance gives a single query surface regardless of source type — CSV, MySQL, PostgreSQL, and SQLite all become DuckDB tables. This means the SQL generation prompt only needs to know one dialect, and the query executor path is identical for every source.
+Pulling all data into a local DuckDB instance provides a single query surface regardless of source type — CSV, MySQL, PostgreSQL, and SQLite all become DuckDB tables. This means the SQL generation prompt only needs to know one dialect, the query executor path is identical for every source, and customer data never travels over the network during query execution. The tradeoff is a one-time import cost at connect time, which is acceptable given the latency requirements.
 
-**Why Groq (Llama 3.3-70B) over a hosted OpenAI model?**
-Groq's inference is significantly faster at lower latency, which matters in a real-time voice pipeline where the user is waiting to hear an answer spoken aloud. The trade-off is that the API key is user-managed (entered in the settings modal), which avoids running a backend service.
+**Why Groq over a hosted OpenAI model?**
+Groq's inference is significantly faster at lower latency, which is critical in a real-time voice pipeline where the user is waiting to hear an answer spoken aloud. The architecture also avoids a centralised backend service — the API key is user-managed — which reduces operational risk and aligns with the data privacy requirements of enterprise customers.
 
 **Why Electron over a web app?**
-DuckDB's CLI needs filesystem access to the `.duckdb` database file, and large CSV files (100 GB+) are referenced by path rather than copied. Both requirements demand native OS access that a browser sandbox cannot provide.
+DuckDB's CLI needs filesystem access to the `.duckdb` database file, and large CSV files (100 GB+) are referenced by path rather than copied. Both requirements demand native OS access that a browser sandbox cannot provide. A desktop model also makes it straightforward to enforce single-instance behaviour, preventing concurrent file access errors.
 
 **Why fresh DuckDB instance per session?**
-The database file is wiped on every app start and on every disconnect. This eliminates stale state, prevents cross-session table leakage, and keeps the schema context fed to the LLM accurate without any synchronisation logic.
+The database file is wiped on every app start and on every disconnect. This eliminates stale state from a previous crash, prevents cross-session table leakage, and ensures the schema context fed to the LLM is always accurate — removing an entire class of silent data-correctness bugs.
 
 **What would you do differently in v2?**
-Use the DuckDB Node.js bindings (`@duckdb/node-api`) instead of shelling out to a CLI binary — it would eliminate the subprocess overhead, enable streaming result sets, and remove the awkward SQL string escaping that the current approach requires.
+Use the DuckDB Node.js bindings (`@duckdb/node-api`) instead of shelling out to a CLI binary — it would eliminate the subprocess overhead, enable streaming result sets, and remove the awkward SQL string escaping the current approach requires. Additionally, migrate auth to support Azure AD / Entra ID for enterprise single sign-on.
+
+---
+
+## Risk Register
+
+| Risk | Mitigation |
+|---|---|
+| SQL injection from AI-generated queries | Regex-validated to `SELECT`/`WITH` only; table names sanitised; DuckDB has no write access to source databases |
+| Stale schema context corrupting LLM output | DuckDB wiped on every startup and disconnect; schema re-extracted fresh per query |
+| API key exposure | Keys stored only in local `AppData/settings.json`; never logged, transmitted, or committed to VCS |
+| DuckDB subprocess fragility | Multi-path search at startup; auto-installer falls back to system binary |
+| Groq rate limits on heavy usage | Two API calls per query only (SQL generation + response formatting); no background polling |
+| Large CSV import blocking the UI | Files >500 MB imported asynchronously in background; progress events pushed to renderer |
 
 ---
 
