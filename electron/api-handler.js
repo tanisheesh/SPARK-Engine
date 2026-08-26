@@ -178,14 +178,22 @@ async function callGroqAPI(messages, apiKey) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'qwen/qwen3.8-27b',
       messages,
       temperature: 0.1,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`Groq API error: ${response.status}`);
+    let errorDetail = `HTTP ${response.status}`;
+    try {
+      const errBody = await response.json();
+      errorDetail = errBody?.error?.message || JSON.stringify(errBody);
+    } catch (_) {
+      errorDetail = await response.text().catch(() => `HTTP ${response.status}`);
+    }
+    console.error('Groq API error:', response.status, errorDetail);
+    throw new Error(`Groq API error (${response.status}): ${errorDetail}`);
   }
 
   const data = await response.json();
