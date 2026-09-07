@@ -178,9 +178,10 @@ async function callGroqAPI(messages, apiKey) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'qwen/qwen3.8-27b',
+      model: 'openai/gpt-oss-120b',
       messages,
       temperature: 0.1,
+      reasoning_effort: 'low',
     }),
   });
 

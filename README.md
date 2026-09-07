@@ -30,7 +30,7 @@ The core value proposition: a product manager, analyst, or executive can interro
 
 ## What you get
 
-- **Voice-to-SQL pipeline** — Speak a question; Deepgram transcribes it in real time, Groq (Qwen 3) writes the SQL, DuckDB runs it, and Inworld AI reads the answer back. The end-to-end loop completes in under 10 seconds on a stable connection.
+- **Voice-to-SQL pipeline** — Speak a question; Deepgram transcribes it in real time, Groq (GPT-OSS 120B) writes the SQL, DuckDB runs it, and Inworld AI reads the answer back. The end-to-end loop completes in under 10 seconds on a stable connection.
 - **Universal data sources** — Connect CSV files of any size (100 GB+), MySQL, PostgreSQL, or SQLite. All data is imported into a local DuckDB instance and wiped clean on disconnect — no data ever leaves the user's machine.
 - **Self-healing SQL** — If the generated query fails, the engine automatically retries with the error context, up to 3 attempts, before surfacing a clear message. This reduces user-facing errors without any manual intervention.
 - **Instant ER diagrams** — Real foreign-key relationships are extracted from `INFORMATION_SCHEMA` / `PRAGMA` and rendered as interactive Chen or Crow's Foot diagrams via ReactFlow. Export as PNG for stakeholder presentations.
@@ -59,7 +59,7 @@ The core value proposition: a product manager, analyst, or executive can interro
 | Styling | Tailwind CSS v3 · Framer Motion |
 | ER diagrams | ReactFlow 11 · Dagre (auto-layout) |
 | Analytics engine | DuckDB (embedded, via CLI) |
-| AI — SQL generation | Groq API · Qwen 3 27B |
+| AI — SQL generation | Groq API · GPT-OSS 120B |
 | Voice input | Deepgram WebSocket (nova-2 model) |
 | Voice output | Inworld AI TTS (inworld-tts-1.5-max) |
 | Auth | Supabase — Google OAuth |
