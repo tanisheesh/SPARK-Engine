@@ -31,7 +31,7 @@
     "framer-motion": "^12.26.2",
     "html-to-image": "^1.11.13",
     "mysql2": "^3.11.5",
-    "next": "16.1.2",
+    "next": "16.3.4",
     "node-llama-cpp": "^3.20.0",
     "papaparse": "^5.5.3",
     "pg": "^8.13.1",
@@ -48,12 +48,12 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.1",
-    "electron": "^32.3.3",
-    "electron-builder": "^25.1.8",
+    "electron": "42.11.3",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
-    "eslint-config-next": "16.1.2",
+    "eslint-config-next": "16.3.4",
     "postcss": "^8.5.6",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.4",
     "tailwindcss": "^3.4.19",
     "typescript": "^5",
     "wait-on": "^8.0.5"
@@ -153,5 +153,13 @@
       "icon": "public/icon.png",
       "category": "Office"
     }
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "electron@42.11.3": true,
+    "node-llama-cpp@3.20.0": true,
+    "unrs-resolver@1.12.2": true,
+    "electron-winstaller@5.4.0": true,
+    "sharp@0.35.4": true
   }
 }
