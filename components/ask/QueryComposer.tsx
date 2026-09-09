@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { IconMic, IconSend, IconStop, IconSpeaker, IconSpeakerOff, IconBookmark } from '../ui/Icons';
+import { IconMic, IconSend, IconStop, IconSpeaker, IconSpeakerOff } from '../ui/Icons';
 import { cx, IconButton, Kbd, Spinner } from '../ui/Primitives';
 import type { VoiceState } from '../../lib/spark/types';
 
@@ -36,7 +36,6 @@ export interface QueryComposerProps {
   onToggleMute: () => void;
   canSpeak: boolean;
 
-  onSave?: () => void;
   disabled?: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
@@ -53,7 +52,6 @@ export function QueryComposer({
   muted,
   onToggleMute,
   canSpeak,
-  onSave,
   disabled,
   inputRef,
 }: QueryComposerProps) {
@@ -155,12 +153,6 @@ export function QueryComposer({
               active={muted}
             >
               {muted ? <IconSpeakerOff size={14} /> : <IconSpeaker size={14} />}
-            </IconButton>
-          )}
-
-          {onSave && value.trim() && (
-            <IconButton label="Save question" side="top" onClick={onSave}>
-              <IconBookmark size={14} />
             </IconButton>
           )}
 

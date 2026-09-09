@@ -1,13 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import type { User as SupabaseUser } from '@supabase/supabase-js';
+import { getSession, signOut, type SparkUser } from '../lib/auth';
+import { fetchBillingStatus } from '../lib/api';
+import type { Tier } from '../lib/api';
 
 import SettingsModal from '../components/SettingsModal';
 import FileUpload from '../components/FileUpload';
 import VisualizationView from '../components/VisualizationView';
 import LoginScreen from '../components/LoginScreen';
+import { PricingScreen } from '../components/PricingScreen';
 import { isFileSource, type DataSourceType } from '../lib/data-sources';
 
 import { Sidebar, type NavKey } from '../components/shell/Sidebar';
@@ -24,7 +26,6 @@ import { ConversationsView } from '../components/conversations/ConversationsView
 import {
   Button,
   ConnState,
-  Modal,
   Spinner,
   ToastMsg,
   ToastStack,
@@ -35,7 +36,6 @@ import type {
   ApiSettings,
   Conversation,
   CsvFileRow,
-  SavedPromptRow,
   SourceType,
   TraceStage,
   Turn,
@@ -124,9 +124,12 @@ const STAGE_STATUS: Partial<Record<TraceStage, Turn['status']>> = {
 
 export default function Home() {
   /* ---------- auth ---------- */
-  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [user, setUser] = useState<SparkUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [savedPrompts, setSavedPrompts] = useState<SavedPromptRow[]>([]);
+
+  /* ---------- billing ---------- */
+  const [plan, setPlan] = useState<Tier | null>(null);
+  const [showPricing, setShowPricing] = useState(false);
 
   /* ---------- settings ---------- */
   const [apiSettings, setApiSettings] = useState<ApiSettings>({});
@@ -158,9 +161,6 @@ export default function Home() {
 
   /* ---------- misc ui ---------- */
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
-  const [savePromptOpen, setSavePromptOpen] = useState(false);
-  const [saveTitle, setSaveTitle] = useState('');
-  const [savingPrompt, setSavingPrompt] = useState(false);
 
   /* ---------- refs ---------- */
   const activeTurnRef = useRef<string | null>(null);
@@ -226,15 +226,13 @@ export default function Home() {
     return out;
   }, [conversations]);
 
-  /** Loads this user's saved questions. Declared above the boot effect
-      that calls it so there is no reference into the temporal dead zone. */
-  const fetchSavedPrompts = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from('saved_prompts')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-    if (data) setSavedPrompts(data as SavedPromptRow[]);
+  const loadBillingStatus = useCallback(async () => {
+    try {
+      const status = await fetchBillingStatus();
+      setPlan(status.tier);
+    } catch (e) {
+      console.error('Failed to load billing status', e);
+    }
   }, []);
 
   /* ============================================================
@@ -256,22 +254,12 @@ export default function Home() {
 
     window.electronAPI?.onOpenSettings(() => setShowSettings(true));
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    getSession().then((session) => {
       setUser(session?.user ?? null);
       setAuthLoading(false);
-      if (session?.user) fetchSavedPrompts(session.user.id);
+      if (session?.user) loadBillingStatus();
     });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-      if (session?.user) fetchSavedPrompts(session.user.id);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  }, [loadBillingStatus]);
 
   /* Persist whenever the thread changes. */
   useEffect(() => {
@@ -348,29 +336,6 @@ export default function Home() {
 
     return () => window.electronAPI?.removeAllListeners('query-progress');
   }, [patchTurn]);
-
-  /* ============================================================
-     Saved prompts (Supabase)
-     ============================================================ */
-
-  const saveCurrentPrompt = async () => {
-    if (!user || !question.trim() || !saveTitle.trim()) return;
-    setSavingPrompt(true);
-    const { error } = await supabase.from('saved_prompts').insert({
-      user_id: user.id,
-      title: saveTitle.trim(),
-      prompt_text: question.trim(),
-    });
-    setSavingPrompt(false);
-    if (error) {
-      toast('Could not save that question.', 'error');
-      return;
-    }
-    fetchSavedPrompts(user.id);
-    setSavePromptOpen(false);
-    setSaveTitle('');
-    toast('Question saved.', 'success');
-  };
 
   /* ============================================================
      Audio
@@ -851,9 +816,9 @@ export default function Home() {
     return (
       <LoginScreen
         onLogin={() =>
-          supabase.auth.getSession().then(({ data: { session } }) => {
+          getSession().then((session) => {
             setUser(session?.user ?? null);
-            if (session?.user) fetchSavedPrompts(session.user.id);
+            if (session?.user) loadBillingStatus();
           })
         }
       />
@@ -874,12 +839,14 @@ export default function Home() {
         settingsConfigured={settingsConfigured}
         conversationCount={conversations.length}
         userEmail={user.email ?? undefined}
-        userAvatar={user.user_metadata?.avatar_url}
+        userAvatar={user.avatarUrl}
         onLogout={async () => {
-          await supabase.auth.signOut();
+          await signOut();
           setUser(null);
-          setSavedPrompts([]);
+          setPlan(null);
         }}
+        plan={plan}
+        onOpenPricing={() => setShowPricing(true)}
       />
 
       {/* ---------- main column ---------- */}
@@ -908,7 +875,6 @@ export default function Home() {
                   onAsk={(q) => runQuestion(q)}
                   onSurprise={() => runStudioAction(ACTION_BY_ID.surprise)}
                   recents={recents}
-                  saved={savedPrompts}
                 />
               ) : (
                 <div className="mx-auto w-full max-w-[720px] divide-y divide-line-subtle">
@@ -948,7 +914,6 @@ export default function Home() {
                   muted={isMuted}
                   onToggleMute={toggleMute}
                   canSpeak={canSpeak}
-                  onSave={user ? () => setSavePromptOpen(true) : undefined}
                   inputRef={composerRef}
                 />
               </div>
@@ -1024,12 +989,6 @@ export default function Home() {
         runningAction={runningAction}
         onRun={runStudioAction}
         onConnect={() => setShowFileUpload(true)}
-        savedPrompts={savedPrompts}
-        onUseSaved={(text) => {
-          setNav('ask');
-          setQuestion(text);
-          composerRef.current?.focus();
-        }}
         conversation={activeConversation}
         onJumpToTurn={(id) => {
           setNav('ask');
@@ -1057,41 +1016,6 @@ export default function Home() {
         connected={connected}
       />
 
-      <Modal
-        open={savePromptOpen}
-        onClose={() => setSavePromptOpen(false)}
-        title="Save this question"
-        subtitle="It shows up on the Ask screen next time."
-        width={440}
-        footer={
-          <>
-            <Button onClick={() => setSavePromptOpen(false)}>Cancel</Button>
-            <Button
-              variant="primary"
-              loading={savingPrompt}
-              disabled={!saveTitle.trim()}
-              onClick={saveCurrentPrompt}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <input
-            value={saveTitle}
-            onChange={(e) => setSaveTitle(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && saveCurrentPrompt()}
-            placeholder="Give it a name"
-            aria-label="Name"
-            className="h-9 w-full rounded-md border border-line bg-bg px-3 text-base text-ink placeholder:text-faint focus:border-accent-line focus:outline-none"
-          />
-          <p className="rounded-md border border-line bg-surface2 px-3 py-2 font-mono text-sm text-muted">
-            {question || '—'}
-          </p>
-        </div>
-      </Modal>
-
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
@@ -1108,6 +1032,13 @@ export default function Home() {
       <ToastStack
         toasts={toasts}
         onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))}
+      />
+
+      <PricingScreen
+        open={showPricing}
+        onClose={() => setShowPricing(false)}
+        user={user}
+        toast={toast}
       />
     </div>
   );

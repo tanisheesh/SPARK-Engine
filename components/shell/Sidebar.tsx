@@ -11,6 +11,7 @@ import {
   IconLogout,
   IconPlug,
   IconSchema,
+  IconZap,
 } from '../ui/Icons';
 import { ConnState, cx, IconButton, Popover, StatusDot, statusLabel } from '../ui/Primitives';
 import type { SourceType } from '../../lib/spark/types';
@@ -52,6 +53,10 @@ export interface SidebarProps {
   userEmail?: string;
   userAvatar?: string;
   onLogout: () => void;
+
+  /** Current billing tier, e.g. "FREE" / "BLAZE" — null while status is loading. */
+  plan: string | null;
+  onOpenPricing: () => void;
 }
 
 export function Sidebar({
@@ -68,6 +73,8 @@ export function Sidebar({
   userEmail,
   userAvatar,
   onLogout,
+  plan,
+  onOpenPricing,
 }: SidebarProps) {
   const [ctxOpen, setCtxOpen] = useState(false);
 
@@ -179,6 +186,20 @@ export function Sidebar({
       <div className="flex-1" />
 
       <div className="p-2.5">
+        <button
+          type="button"
+          onClick={onOpenPricing}
+          className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-1 hover:bg-surface2"
+        >
+          <IconZap size={13} className="shrink-0 text-accent" />
+          <span className="flex-1 text-sm text-muted">
+            {plan && plan !== 'FREE' ? `${plan.charAt(0)}${plan.slice(1).toLowerCase()} plan` : 'Upgrade'}
+          </span>
+          {(!plan || plan === 'FREE') && (
+            <span className="text-2xs text-faint">Free</span>
+          )}
+        </button>
+
         {!settingsConfigured && (
           <button
             type="button"
