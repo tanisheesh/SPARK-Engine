@@ -4,10 +4,31 @@ import { useState, useEffect } from 'react';
 import { Button, Field, Input, Modal, Spinner } from './ui/Primitives';
 import { IconCheck, IconClose, IconSearch } from './ui/Icons';
 
+type PrivacyLevel = 'standard' | 'strict' | 'local';
+
 interface Settings {
   groqApiKey: string;
   deepgramApiKey: string;
+  privacy?: { level: PrivacyLevel };
 }
+
+const PRIVACY_OPTIONS: { value: PrivacyLevel; label: string; detail: string }[] = [
+  {
+    value: 'standard',
+    label: 'Standard',
+    detail: 'Schema and fabricated sample rows go to Groq. Real names, emails and other personal values are replaced with placeholders and restored on your machine.',
+  },
+  {
+    value: 'strict',
+    label: 'Strict',
+    detail: 'Every result value is replaced with a placeholder, no column values are ever shared, and voice output stays on-device. Filters on status-like columns may be less accurate.',
+  },
+  {
+    value: 'local',
+    label: 'Local only',
+    detail: 'Nothing leaves this machine — not even your question. Requires a downloaded local model, and answer quality is noticeably lower.',
+  },
+];
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -20,7 +41,8 @@ type TestState = 'success' | 'error' | 'testing';
 export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   const [settings, setSettings] = useState<Settings>({
     groqApiKey: '',
-    deepgramApiKey: ''
+    deepgramApiKey: '',
+    privacy: { level: 'standard' }
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -149,6 +171,39 @@ export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModal
             onTest={() => testApiKey('deepgram', settings.deepgramApiKey)}
           />
         </KeySection>
+
+        <KeySection
+          title="Privacy"
+          note="Controls what SPARK is allowed to send to Groq. Query execution is always local; this governs the AI calls only."
+        >
+          <div className="flex flex-col gap-2">
+            {PRIVACY_OPTIONS.map((opt) => {
+              const active = (settings.privacy?.level ?? 'standard') === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setSettings({ ...settings, privacy: { level: opt.value } })}
+                  className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                    active
+                      ? 'border-accent-line bg-accent-soft'
+                      : 'border-line-subtle hover:border-line'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-3 w-3 shrink-0 rounded-full border ${
+                        active ? 'border-accent bg-accent' : 'border-line'
+                      }`}
+                    />
+                    <span className="text-sm font-medium text-ink">{opt.label}</span>
+                  </div>
+                  <p className="mt-1 pl-5 text-xs leading-relaxed text-muted">{opt.detail}</p>
+                </button>
+              );
+            })}
+          </div>
+        </KeySection>
       </div>
     </Modal>
   );
@@ -166,26 +221,30 @@ function KeySection({
   title: string;
   note: string;
   required?: boolean;
-  docs: string;
+  docs?: string;
   children: React.ReactNode;
 }) {
   return (
     <section>
       <div className="flex items-baseline gap-2">
         <h3 className="text-md font-medium text-ink">{title}</h3>
-        {required ? (
-          <span className="text-xs text-accent">Required</span>
-        ) : (
-          <span className="text-xs text-faint">Optional</span>
-        )}
+        {docs ? (
+          required ? (
+            <span className="text-xs text-accent">Required</span>
+          ) : (
+            <span className="text-xs text-faint">Optional</span>
+          )
+        ) : null}
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => window.electronAPI?.openExternal(docs)}
-          className="text-xs text-faint transition-colors duration-1 hover:text-ink"
-        >
-          Get a key
-        </button>
+        {docs ? (
+          <button
+            type="button"
+            onClick={() => window.electronAPI?.openExternal(docs)}
+            className="text-xs text-faint transition-colors duration-1 hover:text-ink"
+          >
+            Get a key
+          </button>
+        ) : null}
       </div>
       <p className="mb-2.5 mt-0.5 max-w-[58ch] text-sm leading-relaxed text-muted">{note}</p>
       <div className="space-y-2">{children}</div>

@@ -4,10 +4,18 @@ const path = require('path');
 const duckdbClient = require('./duckdb-client');
 const localLlmClient = require('./local-llm-client');
 const sourceRegistry = require('./source-registry');
+const policy = require('./privacy/policy');
+const sqlGuard = require('./privacy/sql-guard');
+const profiler = require('./privacy/synthesize');
+const tokenizer = require('./privacy/tokenize');
+const audit = require('./privacy/audit');
 
 // Settings directory - cross-platform (Windows: %APPDATA%, macOS: ~/Library/Application Support)
 const settingsDir = app.getPath('userData');
 const uploadsDir = path.join(settingsDir, 'uploads');
+const settingsFile = path.join(settingsDir, 'settings.json');
+
+audit.init(settingsDir);
 
 // Store mainWindow reference
 let mainWindow = null;
@@ -44,13 +52,10 @@ async function queryDuckDB(sql, csvFile = null) {
       await duckdbClient.importCSV(safeDbFile, tableName, safeCsvFile, { replace: false });
     }
 
-    // Execute query with sanitized SQL
-    const normalizedSql = sql.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-
-    // Basic SQL injection prevention - only SELECT/WITH allowed
-    if (!normalizedSql.match(/^(SELECT|WITH)/i)) {
-      throw new Error('Only SELECT queries are allowed');
-    }
+    // Same guard as the main query path. This helper has no caller today but is
+    // exported, so leaving the old leading-keyword check here would just be a
+    // second, weaker door into the same database.
+    const normalizedSql = sqlGuard.assertSafeSelect(sql);
 
     return await duckdbClient.all(safeDbFile, normalizedSql);
   } catch (error) {
@@ -59,8 +64,50 @@ async function queryDuckDB(sql, csvFile = null) {
   }
 }
 
-// API call to Groq
-async function callGroqAPI(messages, apiKey) {
+// API call to Groq.
+//
+// Every privacy control that has to be unbypassable lives HERE rather than in
+// the callers: the network-mode guard, the outbound tripwire, and the audit
+// record all act on the exact string handed to fetch. Putting them in the
+// transport means a future code path cannot route around them by accident.
+async function callGroqAPI(messages, apiKey, privacyCtx = {}) {
+  const level = privacyCtx.level || policy.DEFAULTS.level;
+  policy.assertNetworkAllowed(level, 'Groq');
+
+  const bodyString = JSON.stringify({
+    model: 'openai/gpt-oss-120b',
+    messages,
+    temperature: 0.1,
+    reasoning_effort: 'low',
+  });
+
+  // Tripwire: if any real value survived tokenization — a nested STRUCT/LIST
+  // column, a Date that serializes differently than it compares, a value that
+  // also appears inside the SQL string — the request never leaves the machine.
+  try {
+    tokenizer.assertNoRealValues(bodyString, privacyCtx.vault);
+  } catch (err) {
+    audit.recordBlocked({
+      provider: 'groq',
+      callKind: privacyCtx.callKind,
+      privacyLevel: level,
+      reason: err.message,
+    });
+    throw err;
+  }
+
+  const startedAt = Date.now();
+  const auditId = audit.recordOutbound({
+    provider: 'groq',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'openai/gpt-oss-120b',
+    callKind: privacyCtx.callKind || 'unknown',
+    privacyLevel: level,
+    bodyString,
+    tokensRedacted: privacyCtx.tokensRedacted || 0,
+    retainPayload: privacyCtx.retainPayload === true,
+  });
+
   // A hung/stalled Groq call (not just an error response) must still time out,
   // otherwise generateText()'s fallback to the local model never kicks in.
   const controller = new AbortController();
@@ -74,15 +121,11 @@ async function callGroqAPI(messages, apiKey) {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: 'openai/gpt-oss-120b',
-        messages,
-        temperature: 0.1,
-        reasoning_effort: 'low',
-      }),
+      body: bodyString,
       signal: controller.signal,
     });
   } catch (error) {
+    audit.recordOutcome(auditId, { status: 'error', durationMs: Date.now() - startedAt });
     if (error.name === 'AbortError') {
       throw new Error('Groq request timed out after 15s');
     }
@@ -104,23 +147,43 @@ async function callGroqAPI(messages, apiKey) {
   }
 
   const data = await response.json();
+  audit.recordOutcome(auditId, { status: 'ok', durationMs: Date.now() - startedAt });
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
 // Tries Groq first (fast, high quality); if there's no API key or the call
 // fails (network error, Groq outage, rate limit), falls back to the bundled
 // local model so the app keeps working offline / when Groq is down.
-async function generateText(messages, apiKey) {
-  if (apiKey) {
+//
+// In Local-only mode Groq is skipped entirely rather than tried-and-failed, so
+// no request is ever constructed for it.
+async function generateText(messages, apiKey, privacyCtx = {}) {
+  const level = privacyCtx.level || policy.DEFAULTS.level;
+  const caps = policy.capabilities(level);
+  const cloudAllowed = privacyCtx.callKind === 'sql-gen' ? caps.cloudSqlGen : caps.cloudFormat;
+
+  if (apiKey && cloudAllowed) {
     try {
-      const text = await callGroqAPI(messages, apiKey);
+      const text = await callGroqAPI(messages, apiKey, privacyCtx);
       return { text, source: 'groq' };
     } catch (error) {
+      // A tripwire block is a privacy failure, not a transient one. Falling back
+      // would re-send the same unsafe payload to the local model, which is safe,
+      // but the error must not be swallowed as if Groq were merely down.
       console.warn('⚠️ Groq call failed, falling back to local model:', error.message);
     }
   }
 
   if (!localLlmClient.isModelAvailable()) {
+    // Local-only mode deliberately refuses to reach the network, so an absent
+    // model is a setup problem rather than an outage. Say so precisely instead
+    // of reporting it as a Groq failure the user cannot act on.
+    if (!cloudAllowed) {
+      throw new Error(
+        'Privacy mode is Local-only, but no local model is installed. ' +
+        'Run "npm run fetch-model" to download it (about 1 GB), or switch to Standard or Strict mode in Settings.'
+      );
+    }
     throw new Error(apiKey
       ? 'Groq request failed and no local fallback model is bundled.'
       : 'Groq API key is required (no local fallback model is bundled).');
@@ -167,10 +230,34 @@ async function callDeepgramTTS(text, apiKey) {
   return Buffer.from(arrayBuffer).toString('base64');
 }
 
+// Last rung of the fallback ladder: a correct, if plain, answer composed
+// entirely on this machine. Used when the model's token round-trip fails, so a
+// privacy failure degrades the prose rather than either leaking a value or
+// showing the user a sentence full of raw SPK_Vn tokens.
+function composeLocalAnswer(question, rows) {
+  const n = rows.length;
+  if (n === 0) return `No rows matched "${question}".`;
+
+  const first = rows[0];
+  const keys = Object.keys(first).slice(0, 3);
+  const summary = keys.map(k => `${k}: ${first[k]}`).join(', ');
+  return n === 1
+    ? `Found 1 result — ${summary}.`
+    : `Found ${n} results. The first is ${summary}. The full set is in the table below.`;
+}
+
 // Main query handler with progress updates
 ipcMain.handle('process-query', async (event, { question, csvFile, settings }) => {
   try {
-    if (!settings.groqApiKey) {
+    // The privacy level is read from disk here, NOT taken from the renderer
+    // argument. A renderer-supplied level could be silently downgraded by a bug
+    // or a compromised page, and the audit log would then faithfully record the
+    // downgraded level — worse than having no audit log.
+    const privacyCfg = policy.loadPolicy(settingsFile);
+    const privacyLevel = privacyCfg.level;
+    const caps = policy.capabilities(privacyLevel);
+
+    if (!settings.groqApiKey && caps.cloudSqlGen) {
       throw new Error('Groq API key is required');
     }
 
@@ -206,6 +293,7 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
 
     // Get schema for all tables
     let allSchemas = [];
+    const tableColumns = [];
     for (const table of tables) {
       const tableName = table.table_name;
       const schema = await duckdbClient.getColumns(safeDbFile, tableName);
@@ -213,15 +301,27 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
       if (schema.length > 0) {
         const schemaText = schema.map(row => `${row.column_name} (${row.data_type})`).join(', ');
         allSchemas.push(`Table: ${tableName}\nColumns: ${schemaText}`);
+        tableColumns.push({ tableName, schema });
       }
     }
 
-    sendProgress('sample', 'Getting sample data...');
+    sendProgress('sample', 'Profiling data format...');
 
-    // Get sample data from first table
+    // PRIVACY: this used to be `SELECT * FROM <firstTable> LIMIT 3` — three
+    // complete rows of real customer data, sent to Groq on every single query
+    // even when the question never touched that table. The rows only ever
+    // existed to show the model the data's FORMAT, so the format is now derived
+    // locally and re-emitted as fabricated rows. Real values stay on the machine.
     const firstTable = tables[0].table_name;
     duckdbClient.assertValidIdentifier(firstTable);
-    const sampleData = await duckdbClient.all(safeDbFile, `SELECT * FROM "${firstTable}" LIMIT 3`);
+    const runQuery = (sql) => duckdbClient.all(safeDbFile, sql);
+    const tableProfile = await profiler.profileTable(
+      runQuery,
+      firstTable,
+      (tableColumns.find(t => t.tableName === firstTable) || { schema: [] }).schema,
+      { level: privacyLevel }
+    );
+    const sampleBlock = profiler.buildSampleBlock(tableProfile, privacyCfg.syntheticRows);
 
     sendProgress('sql', 'Generating SQL query...');
 
@@ -234,8 +334,8 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
         Available Tables and Schemas:
         ${allSchemas.join('\n\n')}
         
-        Sample data from ${firstTable}: ${JSON.stringify(sampleData)}
-        
+        ${sampleBlock}
+
         SQL RULES:
         - Write simple, clean SQL queries
         - Use the correct table names from the schema above
@@ -259,7 +359,12 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
     // SQL generation always goes through Groq - the 1.5B local model isn't
     // reliable enough at writing correct SQL against an arbitrary schema, so
     // there's no local fallback here (only for the NLP response-formatting step below).
-    let sqlQuery = await callGroqAPI(sqlPrompt, settings.groqApiKey);
+    const sqlGen = await generateText(sqlPrompt, settings.groqApiKey, {
+      level: privacyLevel,
+      callKind: 'sql-gen',
+      retainPayload: privacyCfg.auditRetainPayload,
+    });
+    let sqlQuery = sqlGen.text;
     sqlQuery = sqlQuery.replace(/```sql\n?/g, '').replace(/```\n?/g, '').trim();
     
     // Auto-fix common type casting issues
@@ -272,32 +377,88 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
 
     sendProgress('execute', 'Executing database query...');
 
-    // Execute SQL query directly on DuckDB
-    const normalizedSql = sqlQuery.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-
-    if (!normalizedSql.match(/^(SELECT|WITH)/i)) {
-      throw new Error('Only SELECT queries are allowed');
-    }
+    // Execute SQL query directly on DuckDB.
+    //
+    // The old check was `/^(SELECT|WITH)/i` on the raw string, which inspected
+    // the leading keyword and nothing else. That let a model completion like
+    //   SELECT * FROM read_csv_auto('C:/Users/<user>/Documents/payroll.csv')
+    // execute, and its rows then flowed into the formatting prompt and out to
+    // Groq. The guard strips comments, rejects stacked statements, denies
+    // file/network table functions, enforces the row cap, and — the actual
+    // control — requires every relation to be one of the tables we imported.
+    const normalizedSql = sqlGuard.assertSafeSelect(sqlQuery, {
+      allowedTables: tables.map(t => t.table_name),
+    });
 
     const queryResults = await duckdbClient.all(safeDbFile, normalizedSql);
 
     sendProgress('format', 'Formatting response...');
 
-    // Format response using Groq
+    // PRIVACY: this used to send up to 5 complete rows of real answer data to
+    // Groq, unredacted. Values are now swapped for opaque SPK_Vn tokens and put
+    // back on this side of the network, so the model composes the sentence
+    // without ever seeing a real value. The vault is per-request and in-memory
+    // only — never persisted, never returned over IPC, never logged.
+    // In Local-only mode the formatting call never leaves this machine, so
+    // tokenizing would only hand the local model placeholders instead of real
+    // values — degrading an already-weak model's phrasing for no privacy gain.
     const limitedResults = queryResults.slice(0, 5);
+    const { rows: safeRows, vault, legend, tokenCount } = caps.cloudFormat
+      ? tokenizer.tokenizeRows(limitedResults, { level: privacyLevel })
+      : { rows: limitedResults, vault: null, legend: '', tokenCount: 0 };
+
     const formatPrompt = [
       {
         role: 'system',
-        content: 'You are a helpful assistant. Convert the query results into a natural, conversational response. Keep it concise and clear. If there are many rows, summarize the findings.'
+        content: [
+          'You are summarizing a database result for a non-technical user.',
+          '',
+          'The data below is REDACTED. Every SPK_Vn token stands for a real value',
+          'you are not permitted to see. Rules, in priority order:',
+          '1. Copy every SPK_Vn token character-for-character. Never change case,',
+          '   never add or remove underscores, never swap one token for another.',
+          '2. Never invent a SPK_Vn token that does not appear in the data below.',
+          '3. Never guess or describe what a token "probably" contains.',
+          '4. Write one to three sentences of plain prose. No markdown, no lists.',
+        ].join('\n')
       },
       {
         role: 'user',
-        content: `Question: ${question}\n\nSQL Query: ${sqlQuery}\n\nResults Summary: Found ${queryResults.length} total rows. Sample data: ${JSON.stringify(limitedResults)}`
+        content: `Question: ${question}\n\nSQL Query: ${sqlQuery}\n\n` +
+          `Results Summary: Found ${queryResults.length} total rows. ` +
+          `Sample data: ${JSON.stringify(safeRows)}` +
+          (legend ? `\n\n${legend}` : '')
       }
     ];
 
-    const formatGen = await generateText(formatPrompt, settings.groqApiKey);
-    const textResponse = formatGen.text;
+    const formatGen = await generateText(formatPrompt, settings.groqApiKey, {
+      level: privacyLevel,
+      callKind: 'format',
+      retainPayload: privacyCfg.auditRetainPayload,
+      vault,
+      tokensRedacted: tokenCount,
+    });
+
+    // Substitution is all-or-nothing. A half-substituted sentence ("SPK_V7 has
+    // the highest balance at $84,200") reads as a bug to the user and as a leak
+    // to an auditor, so anything short of a clean round trip falls through to a
+    // deterministic sentence composed entirely on this machine.
+    const detok = tokenCount
+      ? tokenizer.detokenize(formatGen.text, vault)
+      : { text: formatGen.text, ok: true, recovered: 0, unknown: [] };
+
+    let textResponse;
+    if (detok.ok) {
+      textResponse = detok.text;
+      if (detok.recovered > 0) {
+        console.warn(`⚠️ Recovered ${detok.recovered} mangled token(s) from the model response`);
+      }
+    } else {
+      console.warn('⚠️ Token round-trip failed (unknown:', detok.unknown.join(', ') || 'none',
+        ') — using local template instead');
+      textResponse = composeLocalAnswer(question, queryResults);
+    }
+
     if (formatGen.source === 'local') {
       sendProgress('format', 'Groq unavailable — using local model to phrase the response...');
     }
@@ -308,7 +469,10 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
     // Generate TTS (only with API keys)
     let ttsData = { useBrowserTTS: false, text: textResponse, hasAudio: false };
     
-    if (settings.deepgramApiKey) {
+    // PRIVACY: the answer text here is fully detokenized — it contains the real
+    // values. Sending it to Deepgram would hand a second vendor exactly what we
+    // just withheld from Groq, so Strict and Local-only use browser TTS instead.
+    if (settings.deepgramApiKey && caps.cloudTts) {
       try {
         const audioContent = await callDeepgramTTS(textResponse, settings.deepgramApiKey);
         if (audioContent) {
@@ -333,7 +497,16 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
       results: queryResults.slice(0, 100),
       totalRows: queryResults.length,
       tts: ttsData,
-      usedLocalFallback
+      usedLocalFallback,
+      // Surfaced so the UI can show a truthful privacy badge. Note this carries
+      // the COUNT of redacted values, never the vault contents — those would
+      // land in localStorage via the renderer's conversation history and
+      // outlive the process.
+      privacy: {
+        level: privacyLevel,
+        tokensRedacted: tokenCount,
+        syntheticSample: true,
+      }
     };
 
   } catch (error) {
