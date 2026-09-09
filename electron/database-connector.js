@@ -1,9 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
-const { exec } = require('child_process');
-const util = require('util');
-const execPromise = util.promisify(exec);
+const duckdbClient = require('./duckdb-client');
 
 // Database connector for MySQL, SQLite, PostgreSQL
 class DatabaseConnector {
@@ -12,6 +10,7 @@ class DatabaseConnector {
     if (!fs.existsSync(this.dataDir)) {
       fs.mkdirSync(this.dataDir, { recursive: true });
     }
+    this.dbFile = path.resolve(path.join(path.dirname(this.dataDir), 'data.duckdb'));
   }
 
   /**
@@ -20,9 +19,9 @@ class DatabaseConnector {
   async connectMySQL(config) {
     try {
       console.log('🐬 Connecting to MySQL...', config);
-      
+
       const mysql = require('mysql2/promise');
-      
+
       // Create connection to verify credentials
       const connection = await mysql.createConnection({
         host: config.host,
@@ -46,42 +45,11 @@ class DatabaseConnector {
 
       await connection.end();
 
-      // Get DuckDB path
-      const dbFile = path.join(path.dirname(this.dataDir), 'data.duckdb');
-      const safeDbFile = path.resolve(dbFile);
-      
-      // Find DuckDB executable
-      let duckdbCommand = 'duckdb';
-      const appDir = path.dirname(process.execPath);
-      const possiblePaths = [
-        path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-      ];
-      
-      for (const duckdbPath of possiblePaths) {
-        if (fs.existsSync(duckdbPath)) {
-          duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-          break;
-        }
-      }
-
       // STEP 1: Clean up old MySQL tables from DuckDB
       console.log('🧹 Cleaning up old MySQL tables...');
       try {
-        const cleanupSQL = `
-          SELECT 'DROP TABLE IF EXISTS ' || table_name || ';' as drop_stmt
-          FROM information_schema.tables 
-          WHERE table_schema='main' AND table_name LIKE 'mysql_%'
-        `;
-        
-        const { stdout: dropStmts } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "${cleanupSQL}"`, { timeout: 10000 });
-        const drops = JSON.parse(dropStmts.trim() || '[]');
-        
-        if (drops.length > 0) {
-          const dropSQL = drops.map(d => d.drop_stmt).join(' ');
-          await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${dropSQL}"`, { timeout: 30000 });
-          console.log(`✅ Cleaned up ${drops.length} old MySQL tables`);
-        }
+        const dropped = await duckdbClient.dropTablesWhere(this.dbFile, `table_name LIKE 'mysql_%'`);
+        if (dropped > 0) console.log(`✅ Cleaned up ${dropped} old MySQL tables`);
       } catch (error) {
         console.log('⚠️ No old tables to clean up');
       }
@@ -89,7 +57,7 @@ class DatabaseConnector {
       // STEP 2: Install MySQL extension
       console.log('📦 Installing MySQL extension...');
       try {
-        await execPromise(`${duckdbCommand} "${safeDbFile}" -c "INSTALL mysql; LOAD mysql;"`, { timeout: 30000 });
+        await duckdbClient.execBatch(this.dbFile, ['INSTALL mysql', 'LOAD mysql']);
         console.log('✅ MySQL extension loaded');
       } catch (error) {
         console.log('⚠️ MySQL extension may already be installed');
@@ -98,34 +66,23 @@ class DatabaseConnector {
       const importedTables = [];
       let totalRows = 0;
 
-      // STEP 3: Create connection string for DuckDB
-      const connectionString = `host=${config.host} port=${config.port} user=${config.user} password=${config.password} database=${config.database}`;
+      // STEP 3: Build connection string for DuckDB (values only, not user-controlled free text)
+      const connectionString = `host=${config.host} port=${config.port} user=${config.user} password=${escapeSqlLiteral(config.password)} database=${config.database}`;
 
       // STEP 4: Build all SQL commands in one batch
-      const sqlCommands = [];
-      
-      // Attach database
-      sqlCommands.push(`ATTACH '${connectionString}' AS mysql_source (TYPE mysql)`);
-      
-      // Import all tables
+      const sqlCommands = [`ATTACH '${connectionString}' AS mysql_source (TYPE mysql)`];
+
       for (const table of tables) {
         const sanitizedTableName = `mysql_${config.database}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
-        sqlCommands.push(`DROP TABLE IF EXISTS ${sanitizedTableName}`);
-        sqlCommands.push(`CREATE TABLE ${sanitizedTableName} AS SELECT * FROM mysql_source.${table}`);
+        sqlCommands.push(`DROP TABLE IF EXISTS "${sanitizedTableName}"`);
+        sqlCommands.push(`CREATE TABLE "${sanitizedTableName}" AS SELECT * FROM mysql_source."${table}"`);
       }
-      
-      // Detach
+
       sqlCommands.push('DETACH mysql_source');
-      
-      // Execute all commands in one go
-      const batchSQL = sqlCommands.join('; ');
-      
+
       console.log('📊 Importing all tables in batch...');
       try {
-        await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${batchSQL}"`, { 
-          timeout: 300000, // 5 minutes
-          maxBuffer: 100 * 1024 * 1024 
-        });
+        await duckdbClient.execBatch(this.dbFile, sqlCommands);
         console.log('✅ Batch import completed');
       } catch (error) {
         console.error('❌ Batch import failed:', error.message);
@@ -135,19 +92,12 @@ class DatabaseConnector {
       // STEP 5: Get row counts for each table
       for (const table of tables) {
         const sanitizedTableName = `mysql_${config.database}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
-        
+
         try {
-          const countCmd = `${duckdbCommand} "${safeDbFile}" -json -c "SELECT COUNT(*) as count FROM ${sanitizedTableName}"`;
-          const { stdout } = await execPromise(countCmd, { timeout: 10000 });
-          const result = JSON.parse(stdout.trim());
+          const result = await duckdbClient.all(this.dbFile, `SELECT COUNT(*) as count FROM "${sanitizedTableName}"`);
           const rowCount = result[0]?.count || 0;
-          
-          importedTables.push({
-            table,
-            duckdbTable: sanitizedTableName,
-            rows: rowCount
-          });
-          
+
+          importedTables.push({ table, duckdbTable: sanitizedTableName, rows: rowCount });
           totalRows += rowCount;
           console.log(`  ✅ ${table}: ${rowCount} rows imported`);
         } catch (error) {
@@ -175,12 +125,12 @@ class DatabaseConnector {
   }
 
   /**
-   * Connect to SQLite and export data to CSV via DuckDB
+   * Connect to SQLite and import directly into DuckDB
    */
   async connectSQLite(config) {
     try {
       console.log('💾 Connecting to SQLite...', config);
-      
+
       if (!fs.existsSync(config.filePath)) {
         throw new Error('SQLite database file not found');
       }
@@ -201,70 +151,52 @@ class DatabaseConnector {
 
       db.close();
 
-      // Get DuckDB path
-      const dbFile = path.join(path.dirname(this.dataDir), 'data.duckdb');
-      const safeDbFile = path.resolve(dbFile);
-      const safeFilePath = config.filePath.replace(/\\/g, '/');
-
-      let duckdbCommand = 'duckdb';
-      const appDir = path.dirname(process.execPath);
-      const possiblePaths = [
-        path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-      ];
-      for (const p of possiblePaths) {
-        if (fs.existsSync(p)) { duckdbCommand = `"${path.resolve(p)}"`; break; }
-      }
-
+      const safeFilePath = path.resolve(config.filePath);
       const dbName = path.basename(config.filePath, '.db').replace(/[^a-zA-Z0-9_]/g, '_');
 
       // Clean up old sqlite tables
       console.log('🧹 Cleaning up old SQLite tables...');
       try {
-        const cleanupSQL = `SELECT 'DROP TABLE IF EXISTS ' || table_name || ';' as drop_stmt FROM information_schema.tables WHERE table_schema='main' AND table_name LIKE 'sqlite_%'`;
-        const { stdout: dropStmts } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "${cleanupSQL}"`, { timeout: 10000 });
-        const drops = JSON.parse(dropStmts.trim() || '[]');
-        if (drops.length > 0) {
-          const dropSQL = drops.map(d => d.drop_stmt).join(' ');
-          await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${dropSQL}"`, { timeout: 30000 });
-        }
+        const dropped = await duckdbClient.dropTablesWhere(this.dbFile, `table_name LIKE 'sqlite_%'`);
+        if (dropped > 0) console.log(`✅ Cleaned up ${dropped} old SQLite tables`);
       } catch (e) { /* no old tables */ }
 
       // Import each table directly from SQLite file using DuckDB's sqlite extension
       console.log('📦 Installing SQLite extension...');
       try {
-        await execPromise(`${duckdbCommand} "${safeDbFile}" -c "INSTALL sqlite; LOAD sqlite;"`, { timeout: 30000 });
+        await duckdbClient.execBatch(this.dbFile, ['INSTALL sqlite', 'LOAD sqlite']);
         console.log('✅ SQLite extension loaded');
       } catch (e) {
         console.log('⚠️ SQLite extension may already be installed');
       }
 
-      // Build batch import SQL
-      const sqlCommands = [`ATTACH '${safeFilePath}' AS sqlite_source (TYPE sqlite)`];
-      for (const table of tables) {
-        const sanitizedName = `sqlite_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
-        sqlCommands.push(`DROP TABLE IF EXISTS ${sanitizedName}`);
-        sqlCommands.push(`CREATE TABLE ${sanitizedName} AS SELECT * FROM sqlite_source.${table}`);
+      // Build batch import SQL - ATTACH accepts a bound parameter for the file path,
+      // so it runs separately (via run()) from the rest of the batch (via execBatch()).
+      const sanitizedNames = tables.map(table => `sqlite_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_'));
+      const restCommands = [];
+      for (let i = 0; i < tables.length; i++) {
+        restCommands.push(`DROP TABLE IF EXISTS "${sanitizedNames[i]}"`);
+        restCommands.push(`CREATE TABLE "${sanitizedNames[i]}" AS SELECT * FROM sqlite_source."${tables[i]}"`);
       }
-      sqlCommands.push('DETACH sqlite_source');
+      restCommands.push('DETACH sqlite_source');
 
-      const batchSQL = sqlCommands.join('; ');
       console.log('📊 Importing all SQLite tables into DuckDB...');
-      await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${batchSQL}"`, { timeout: 300000, maxBuffer: 100 * 1024 * 1024 });
+      await duckdbClient.run(this.dbFile, 'ATTACH ? AS sqlite_source (TYPE sqlite)', [safeFilePath]);
+      await duckdbClient.execBatch(this.dbFile, restCommands);
 
       // Get row counts
       const importedTables = [];
       let totalRows = 0;
-      for (const table of tables) {
-        const sanitizedName = `sqlite_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
+      for (let i = 0; i < tables.length; i++) {
+        const sanitizedName = sanitizedNames[i];
         try {
-          const { stdout } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "SELECT COUNT(*) as count FROM ${sanitizedName}"`, { timeout: 10000 });
-          const rowCount = JSON.parse(stdout.trim())[0]?.count || 0;
-          importedTables.push({ table, duckdbTable: sanitizedName, rows: rowCount });
+          const result = await duckdbClient.all(this.dbFile, `SELECT COUNT(*) as count FROM "${sanitizedName}"`);
+          const rowCount = result[0]?.count || 0;
+          importedTables.push({ table: tables[i], duckdbTable: sanitizedName, rows: rowCount });
           totalRows += rowCount;
-          console.log(`  ✅ ${table}: ${rowCount} rows imported`);
+          console.log(`  ✅ ${tables[i]}: ${rowCount} rows imported`);
         } catch (e) {
-          console.error(`  ⚠️ Could not get count for ${table}`);
+          console.error(`  ⚠️ Could not get count for ${tables[i]}`);
         }
       }
 
@@ -309,47 +241,34 @@ class DatabaseConnector {
       }
       await client.end();
 
-      // DuckDB setup
-      const dbFile = path.join(path.dirname(this.dataDir), 'data.duckdb');
-      const safeDbFile = path.resolve(dbFile);
-      let duckdbCommand = 'duckdb';
-      const possiblePaths = [
-        path.join(path.dirname(process.execPath), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-      ];
-      for (const p of possiblePaths) { if (fs.existsSync(p)) { duckdbCommand = `"${path.resolve(p)}"`; break; } }
-
       const dbName = config.database.replace(/[^a-zA-Z0-9_]/g, '_');
 
       // Clean old postgres tables
       console.log('🧹 Cleaning up old PostgreSQL tables...');
       try {
-        const { stdout: dropStmts } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "SELECT 'DROP TABLE IF EXISTS ' || table_name || ';' as s FROM information_schema.tables WHERE table_schema='main' AND table_name LIKE 'postgres_%'"`, { timeout: 10000 });
-        const drops = JSON.parse(dropStmts.trim() || '[]');
-        if (drops.length > 0) {
-          await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${drops.map(d => d.s).join(' ')}"`, { timeout: 30000 });
-        }
+        const dropped = await duckdbClient.dropTablesWhere(this.dbFile, `table_name LIKE 'postgres_%'`);
+        if (dropped > 0) console.log(`✅ Cleaned up ${dropped} old PostgreSQL tables`);
       } catch (e) { /* no old tables */ }
 
       // Install postgres extension
       console.log('📦 Installing PostgreSQL extension...');
       try {
-        await execPromise(`${duckdbCommand} "${safeDbFile}" -c "INSTALL postgres; LOAD postgres;"`, { timeout: 30000 });
+        await duckdbClient.execBatch(this.dbFile, ['INSTALL postgres', 'LOAD postgres']);
         console.log('✅ PostgreSQL extension loaded');
       } catch (e) { console.log('⚠️ PostgreSQL extension may already be installed'); }
 
       // Build batch import SQL
-      const connStr = `host=${config.host} port=${config.port} user=${config.user} password=${config.password} dbname=${config.database}`;
+      const connStr = `host=${config.host} port=${config.port} user=${config.user} password=${escapeSqlLiteral(config.password)} dbname=${config.database}`;
       const sqlCommands = [`ATTACH '${connStr}' AS pg_source (TYPE postgres)`];
       for (const table of tables) {
         const sanitizedName = `postgres_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
-        sqlCommands.push(`DROP TABLE IF EXISTS ${sanitizedName}`);
-        sqlCommands.push(`CREATE TABLE ${sanitizedName} AS SELECT * FROM pg_source.${table}`);
+        sqlCommands.push(`DROP TABLE IF EXISTS "${sanitizedName}"`);
+        sqlCommands.push(`CREATE TABLE "${sanitizedName}" AS SELECT * FROM pg_source."${table}"`);
       }
       sqlCommands.push('DETACH pg_source');
 
       console.log('📊 Importing all PostgreSQL tables into DuckDB...');
-      await execPromise(`${duckdbCommand} "${safeDbFile}" -c "${sqlCommands.join('; ')}"`, { timeout: 300000, maxBuffer: 100 * 1024 * 1024 });
+      await duckdbClient.execBatch(this.dbFile, sqlCommands);
 
       // Get row counts
       const importedTables = [];
@@ -357,8 +276,8 @@ class DatabaseConnector {
       for (const table of tables) {
         const sanitizedName = `postgres_${dbName}_${table}`.replace(/[^a-zA-Z0-9_]/g, '_');
         try {
-          const { stdout } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "SELECT COUNT(*) as count FROM ${sanitizedName}"`, { timeout: 10000 });
-          const rowCount = JSON.parse(stdout.trim())[0]?.count || 0;
+          const result = await duckdbClient.all(this.dbFile, `SELECT COUNT(*) as count FROM "${sanitizedName}"`);
+          const rowCount = result[0]?.count || 0;
           importedTables.push({ table, duckdbTable: sanitizedName, rows: rowCount });
           totalRows += rowCount;
           console.log(`  ✅ ${table}: ${rowCount} rows imported`);
@@ -392,6 +311,12 @@ class DatabaseConnector {
         };
     }
   }
+}
+
+// Doubles single quotes for safe interpolation into SQL string literals
+// (connection strings built from config fields, not raw user SQL).
+function escapeSqlLiteral(value) {
+  return String(value).replace(/'/g, "''");
 }
 
 module.exports = DatabaseConnector;

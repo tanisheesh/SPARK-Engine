@@ -1,14 +1,10 @@
-const { ipcMain } = require('electron');
-const { exec } = require('child_process');
-const { promisify } = require('util');
+const { ipcMain, app } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const duckdbClient = require('./duckdb-client');
 
-const execAsync = promisify(exec);
-
-// Settings directory
-const settingsDir = path.join(os.homedir(), 'AppData', 'Roaming', 'spark-engine');
+// Settings directory - cross-platform (Windows: %APPDATA%, macOS: ~/Library/Application Support)
+const settingsDir = app.getPath('userData');
 const uploadsDir = path.join(settingsDir, 'uploads');
 
 // Store mainWindow reference
@@ -26,143 +22,35 @@ function sendProgress(stage, message) {
   }
 }
 
-// Database operations with proper sanitization
+// Database operations - native DuckDB bindings, no CLI/shell involved
 async function queryDuckDB(sql, csvFile = null) {
   try {
     const dbFile = path.join(settingsDir, 'data.duckdb');
     const safeDbFile = path.resolve(dbFile);
-    
-    let tableName = null;
-    let safeCsvFile = null;
-    
+
     // Only process CSV file if provided
     if (csvFile) {
-      // Sanitize table name - only allow alphanumeric and underscores
       const rawTableName = path.basename(csvFile, '.csv');
-      tableName = rawTableName.replace(/[^a-zA-Z0-9_]/g, '_');
-      
-      // Validate table name
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
-        throw new Error('Invalid table name format');
-      }
-      
-      // Validate CSV file path exists and is accessible
+      const tableName = rawTableName.replace(/[^a-zA-Z0-9_]/g, '_');
+      duckdbClient.assertValidIdentifier(tableName);
+
       if (!fs.existsSync(csvFile)) {
         throw new Error('CSV file not found');
       }
-      
-      // Get absolute paths to prevent path traversal
-      safeCsvFile = path.resolve(csvFile);
+
+      const safeCsvFile = path.resolve(csvFile);
+      await duckdbClient.importCSV(safeDbFile, tableName, safeCsvFile, { replace: false });
     }
-    
-    // Try local DuckDB first (from app directory)
-    let duckdbCommand = 'duckdb';
-    
-    // In production, always try to use the local DuckDB first
-    if (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV) {
-      const appDir = path.dirname(process.execPath);
-      const resourcesDir = process.resourcesPath || path.join(appDir, 'resources');
-      
-      // Try multiple possible locations for packaged app
-      const possiblePaths = [
-        // Direct in app directory
-        path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        // In resources directory
-        path.join(resourcesDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        // In resources/app directory
-        path.join(resourcesDir, 'app', process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        // Alternative path structure
-        path.join(appDir, 'resources', 'app', process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        // Another common location
-        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-      ];
-      
-      let duckdbFound = false;
-      for (const duckdbPath of possiblePaths) {
-        console.log(`🔍 Checking DuckDB at: ${duckdbPath}`);
-        if (fs.existsSync(duckdbPath)) {
-          try {
-            // Test if DuckDB works
-            await execAsync(`"${path.resolve(duckdbPath)}" --version`, { timeout: 10000 });
-            duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-            duckdbFound = true;
-            console.log(`✅ Found working DuckDB at: ${duckdbPath}`);
-            break;
-          } catch (testError) {
-            console.log(`❌ DuckDB at ${duckdbPath} not working:`, testError.message);
-          }
-        } else {
-          console.log(`❌ DuckDB not found at: ${duckdbPath}`);
-        }
-      }
-      
-      if (!duckdbFound) {
-        console.error('❌ DuckDB not found in any location. Attempting system fallback...');
-        // Try system DuckDB as last resort
-        try {
-          await execAsync('duckdb --version', { timeout: 5000 });
-          duckdbCommand = 'duckdb';
-          console.log('✅ Using system DuckDB');
-        } catch (systemError) {
-          throw new Error('DuckDB not found. Please restart the application to auto-install DuckDB, or install DuckDB manually.');
-        }
-      }
-    } else {
-      // Development mode - try local first, then system
-      const appDir = path.dirname(process.execPath);
-      const localDuckDB = path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb');
-      
-      if (fs.existsSync(localDuckDB)) {
-        duckdbCommand = `"${path.resolve(localDuckDB)}"`;
-      }
-      // Otherwise use system duckdb
-    }
-    
-    // Ensure table exists with parameterized approach (only if CSV file provided)
-    if (csvFile && safeCsvFile && tableName) {
-      const createTableCmd = [
-        duckdbCommand,
-        `"${safeDbFile}"`,
-        '-c',
-        `"CREATE TABLE IF NOT EXISTS ${tableName} AS SELECT * FROM '${safeCsvFile}'"`
-      ];
-      
-      await execAsync(createTableCmd.join(' '), { timeout: 60000 });
-    }
-    
+
     // Execute query with sanitized SQL
     const normalizedSql = sql.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-    
-    // Basic SQL injection prevention - validate SQL structure
+
+    // Basic SQL injection prevention - only SELECT/WITH allowed
     if (!normalizedSql.match(/^(SELECT|WITH)/i)) {
       throw new Error('Only SELECT queries are allowed');
     }
-    
-    // Escape quotes in SQL
-    const escapedSql = normalizedSql.replace(/"/g, '\\"');
-    
-    const queryCmd = [
-      duckdbCommand,
-      `"${safeDbFile}"`,
-      '-json',
-      '-c',
-      `"${escapedSql}"`
-    ];
-    
-    const { stdout } = await execAsync(queryCmd.join(' '), { 
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: 30000 
-    });
-    
-    if (!stdout || !stdout.trim()) return [];
-    
-    try {
-      const result = JSON.parse(stdout.trim());
-      return Array.isArray(result) ? result : [result];
-    } catch (e) {
-      const lines = stdout.trim().split('\n').filter(line => line.trim());
-      return lines.map(line => JSON.parse(line));
-    }
+
+    return await duckdbClient.all(safeDbFile, normalizedSql);
   } catch (error) {
     console.error('Database error:', error);
     throw new Error(`Database query failed: ${error.message}`);
@@ -244,93 +132,27 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
     // Get all tables in DuckDB
     const dbFile = path.join(settingsDir, 'data.duckdb');
     const safeDbFile = path.resolve(dbFile);
-    
-    // Try local DuckDB first
-    let duckdbCommand = 'duckdb';
-    if (process.env.NODE_ENV === 'production' || !process.env.NODE_ENV) {
-      const appDir = path.dirname(process.execPath);
-      const resourcesDir = process.resourcesPath || path.join(appDir, 'resources');
-      const possiblePaths = [
-        path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(resourcesDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(resourcesDir, 'app', process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(appDir, 'resources', 'app', process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-      ];
-      
-      for (const duckdbPath of possiblePaths) {
-        if (fs.existsSync(duckdbPath)) {
-          try {
-            await execAsync(`"${path.resolve(duckdbPath)}" --version`, { timeout: 10000 });
-            duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-            break;
-          } catch (testError) {
-            // Continue to next path
-          }
-        }
-      }
-    }
 
-    // Get list of all tables in DuckDB based on connection type
-    let tableFilter = '';
-    
     // Determine which tables to query based on csvFile path
-    if (csvFile && csvFile !== 'duckdb://direct') {
-      // CSV file - query only CSV tables (no prefix)
-      tableFilter = `"SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name NOT LIKE 'mysql_%' AND table_name NOT LIKE 'sqlite_%' AND table_name NOT LIKE 'postgres_%'"`;
-    } else {
-      // Database connection - query only database tables (with prefix)
-      tableFilter = `"SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND (table_name LIKE 'mysql_%' OR table_name LIKE 'sqlite_%' OR table_name LIKE 'postgres_%')"`;
-    }
-    
-    const listTablesCmd = [
-      duckdbCommand,
-      `"${safeDbFile}"`,
-      '-json',
-      '-c',
-      tableFilter
-    ];
-    
-    console.log('🔍 Executing table list command:', listTablesCmd.join(' '));
-    const { stdout: tablesOutput } = await execAsync(listTablesCmd.join(' '), { timeout: 10000 });
-    console.log('📋 Raw tables output:', tablesOutput);
-    
-    const tables = JSON.parse(tablesOutput.trim() || '[]');
+    const tableFilter = (csvFile && csvFile !== 'duckdb://direct')
+      ? `table_name NOT LIKE 'mysql_%' AND table_name NOT LIKE 'sqlite_%' AND table_name NOT LIKE 'postgres_%'`
+      : `table_name LIKE 'mysql_%' OR table_name LIKE 'sqlite_%' OR table_name LIKE 'postgres_%'`;
+
+    const tables = await duckdbClient.getTables(safeDbFile, tableFilter);
     console.log('📋 Parsed tables:', JSON.stringify(tables));
-    
+
     if (tables.length === 0) {
-      // Try without filter to see all tables
-      const allTablesCmd = [
-        duckdbCommand,
-        `"${safeDbFile}"`,
-        '-json',
-        '-c',
-        `"SELECT table_name FROM information_schema.tables WHERE table_schema='main'"`
-      ];
-      const { stdout: allTablesOutput } = await execAsync(allTablesCmd.join(' '), { timeout: 10000 });
-      console.log('📋 ALL tables in database:', allTablesOutput);
-      
       throw new Error('No tables found in database. Please connect to a database first.');
     }
-    
+
     console.log('📋 Available tables:', tables.map(t => t.table_name).join(', '));
 
     // Get schema for all tables
     let allSchemas = [];
     for (const table of tables) {
       const tableName = table.table_name;
-      const schemaQuery = `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '${tableName}'`;
-      const schemaCmd = [
-        duckdbCommand,
-        `"${safeDbFile}"`,
-        '-json',
-        '-c',
-        `"${schemaQuery}"`
-      ];
-      
-      const { stdout: schemaOutput } = await execAsync(schemaCmd.join(' '), { timeout: 10000 });
-      const schema = JSON.parse(schemaOutput.trim() || '[]');
-      
+      const schema = await duckdbClient.getColumns(safeDbFile, tableName);
+
       if (schema.length > 0) {
         const schemaText = schema.map(row => `${row.column_name} (${row.data_type})`).join(', ');
         allSchemas.push(`Table: ${tableName}\nColumns: ${schemaText}`);
@@ -341,17 +163,8 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
 
     // Get sample data from first table
     const firstTable = tables[0].table_name;
-    const sampleQuery = `SELECT * FROM ${firstTable} LIMIT 3`;
-    const sampleCmd = [
-      duckdbCommand,
-      `"${safeDbFile}"`,
-      '-json',
-      '-c',
-      `"${sampleQuery}"`
-    ];
-    
-    const { stdout: sampleOutput } = await execAsync(sampleCmd.join(' '), { timeout: 10000 });
-    const sampleData = JSON.parse(sampleOutput.trim() || '[]');
+    duckdbClient.assertValidIdentifier(firstTable);
+    const sampleData = await duckdbClient.all(safeDbFile, `SELECT * FROM "${firstTable}" LIMIT 3`);
 
     sendProgress('sql', 'Generating SQL query...');
 
@@ -401,35 +214,12 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
 
     // Execute SQL query directly on DuckDB
     const normalizedSql = sqlQuery.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-    
+
     if (!normalizedSql.match(/^(SELECT|WITH)/i)) {
       throw new Error('Only SELECT queries are allowed');
     }
-    
-    const escapedSql = normalizedSql.replace(/"/g, '\\"');
-    const queryCmd = [
-      duckdbCommand,
-      `"${safeDbFile}"`,
-      '-json',
-      '-c',
-      `"${escapedSql}"`
-    ];
-    
-    const { stdout: queryOutput } = await execAsync(queryCmd.join(' '), { 
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: 30000 
-    });
-    
-    let queryResults = [];
-    if (queryOutput && queryOutput.trim()) {
-      try {
-        const result = JSON.parse(queryOutput.trim());
-        queryResults = Array.isArray(result) ? result : [result];
-      } catch (e) {
-        const lines = queryOutput.trim().split('\n').filter(line => line.trim());
-        queryResults = lines.map(line => JSON.parse(line));
-      }
-    }
+
+    const queryResults = await duckdbClient.all(safeDbFile, normalizedSql);
 
     sendProgress('format', 'Formatting response...');
 
