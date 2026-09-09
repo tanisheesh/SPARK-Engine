@@ -1,5 +1,5 @@
 const { client, TABLES, PutCommand, GetCommand } = require('../shared/dynamo');
-const { userIdFrom, json } = require('../shared/auth');
+const { userIdFrom, json, parseJsonBody } = require('../shared/auth');
 const { verifyPaymentSignature } = require('../shared/razorpay');
 const { addCycle } = require('../shared/billing');
 
@@ -12,7 +12,7 @@ const { addCycle } = require('../shared/billing');
 exports.handler = async (event) => {
   try {
     const userId = userIdFrom(event);
-    const body = JSON.parse(event.body || '{}');
+    const body = parseJsonBody(event);
     const { orderId, paymentId, signature } = body;
     if (!orderId || !paymentId || !signature) {
       return json(400, { error: 'orderId, paymentId and signature are required' });
