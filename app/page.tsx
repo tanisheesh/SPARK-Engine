@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import Navbar from '../components/landing/Navbar';
 import Hero from '../components/landing/Hero';
+import CursorGlow from '../components/landing/CursorGlow';
+import Grain from '../components/landing/Grain';
 import ProductPreview from '../components/landing/ProductPreview';
 import HowItWorks from '../components/landing/HowItWorks';
 import StudioGrid from '../components/landing/StudioGrid';
@@ -37,6 +39,8 @@ export const metadata: Metadata = {
 export default function LandingPage() {
   return (
     <div style={{ background: '#0A0A0A', color: '#F5F5F5' }}>
+      <CursorGlow />
+      <Grain />
       <Navbar />
       <Hero />
       <ProductPreview />

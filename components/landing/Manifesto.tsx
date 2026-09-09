@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import SparkCompass from './SparkCompass';
+import AnimatedWords from './AnimatedWords';
 
 const LINES = [
   'Data has always had answers.',
@@ -29,7 +30,7 @@ export default function Manifesto() {
         className="absolute inset-0 flex items-center justify-center pointer-events-none"
         style={{ opacity: 0.06 }}
       >
-        <SparkCompass size={700} animate={false} />
+        <SparkCompass size={700} animate={false} interactive={false} />
       </div>
 
       {/* Hairline top/bottom rules */}
@@ -66,7 +67,7 @@ export default function Manifesto() {
                 minHeight: line === '' ? '0.75rem' : undefined,
               }}
             >
-              {line || '\u00A0'}
+              {line ? <AnimatedWords text={line} /> : '\u00A0'}
             </motion.p>
           ))}
         </div>

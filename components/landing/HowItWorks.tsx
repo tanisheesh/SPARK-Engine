@@ -1,6 +1,8 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import AnimatedWords from './AnimatedWords';
+import ScrambleText from './ScrambleText';
 
 const STEPS = [
   {
@@ -67,7 +69,7 @@ export default function HowItWorks() {
             className="font-semibold tracking-tight"
             style={{ fontSize: 'clamp(1.5rem, 3vw, 2.2rem)', color: '#F5F5F5', letterSpacing: '-0.02em' }}
           >
-            From question to answer in seconds.
+            <ScrambleText text="From question to answer in seconds." delay={0.2} />
           </h2>
         </motion.div>
 
@@ -91,8 +93,8 @@ export default function HowItWorks() {
                   {step.icon}
                 </div>
               </div>
-              <p className="font-medium text-sm" style={{ color: '#F5F5F5' }}>{step.label}</p>
-              <p className="text-sm leading-relaxed" style={{ color: '#6A6A6A' }}>{step.description}</p>
+              <p className="font-medium text-sm" style={{ color: '#F5F5F5' }}><AnimatedWords text={step.label} /></p>
+              <p className="text-sm leading-relaxed" style={{ color: '#6A6A6A' }}><AnimatedWords text={step.description} /></p>
             </motion.div>
           ))}
         </div>

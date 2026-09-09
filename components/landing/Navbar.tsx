@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import MagneticButton from './MagneticButton';
 
 function SparkMark({ size = 16 }: { size?: number }) {
   return (
@@ -17,9 +18,14 @@ function SparkMark({ size = 16 }: { size?: number }) {
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [scrollPct, setScrollPct] = useState(0);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 16);
+    const onScroll = () => {
+      setScrolled(window.scrollY > 16);
+      const max = document.body.scrollHeight - window.innerHeight;
+      setScrollPct(max > 0 ? Math.min(window.scrollY / max, 1) : 0);
+    };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
@@ -56,13 +62,15 @@ export default function Navbar() {
           ))}
         </nav>
 
-        <a href="#cta" className="hidden md:inline-flex text-sm px-4 py-1.5 rounded-md font-medium transition-colors duration-150"
-          style={{ background: '#A9C08E', color: '#0A0A0A' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = '#96AD7A')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = '#A9C08E')}
-        >
-          Get started
-        </a>
+        <MagneticButton>
+          <a href="#cta" className="hidden md:inline-flex text-sm px-4 py-1.5 rounded-md font-medium transition-colors duration-150"
+            style={{ background: '#A9C08E', color: '#0A0A0A' }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = '#96AD7A')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = '#A9C08E')}
+          >
+            Get started
+          </a>
+        </MagneticButton>
 
         <button className="md:hidden" style={{ color: '#9A9A9A' }} onClick={() => setMobileOpen(!mobileOpen)} aria-label="Menu">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
@@ -72,6 +80,20 @@ export default function Navbar() {
           </svg>
         </button>
       </div>
+
+      {/* Scroll progress bar */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          height: '1px',
+          width: `${scrollPct * 100}%`,
+          background: '#A9C08E',
+          transition: 'width 0.1s linear',
+          pointerEvents: 'none',
+        }}
+      />
 
       {mobileOpen && (
         <div className="md:hidden px-6 pb-5 flex flex-col gap-3" style={{ borderTop: '1px solid #2A2A2A' }}>
