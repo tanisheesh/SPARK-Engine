@@ -20,6 +20,8 @@ const localLlmClient = require('./local-llm-client');
 const { performSystemCheck } = require('./system-check');
 const DatabaseConnector = require('./database-connector');
 const sourceRegistry = require('./source-registry');
+const secureStore = require('./secure-store');
+const profiler = require('./privacy/synthesize');
 
 // App settings directory - cross-platform (Windows: %APPDATA%, macOS: ~/Library/Application Support)
 const settingsDir = app.getPath('userData');
@@ -101,6 +103,15 @@ function createWindow() {
 
 // App event listeners
 app.whenReady().then(async () => {
+  // Move any plaintext API keys out of settings.json into the OS-encrypted
+  // store. Runs before anything reads settings, so the rest of the app only
+  // ever sees keys via secureStore.
+  secureStore.init(settingsDir);
+  const migratedKeys = secureStore.migrateFromSettings(settingsFile);
+  if (migratedKeys.length) {
+    console.log('🔐 Encrypted ' + migratedKeys.join(', ') + ' at rest. Rotate them: the plaintext copy may exist in a backup.');
+  }
+
   // Register custom protocol for OAuth callback
   if (process.defaultApp) {
     if (process.argv.length >= 2) {
@@ -194,10 +205,13 @@ app.on('before-quit', () => {
 // IPC handlers
 ipcMain.handle('get-settings', () => {
   try {
+    let stored = {};
     if (fs.existsSync(settingsFile)) {
-      const data = fs.readFileSync(settingsFile, 'utf8');
-      return JSON.parse(data);
+      stored = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     }
+    // Keys live encrypted in secrets.json, not in settings.json, and are merged
+    // back in here so the rest of the app sees the shape it always saw.
+    return { ...stored, ...secureStore.getAllSecrets() };
   } catch (error) {
     console.error('Error reading settings:', error);
   }
@@ -206,7 +220,26 @@ ipcMain.handle('get-settings', () => {
 
 ipcMain.handle('save-settings', (event, settings) => {
   try {
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+    // Validate the privacy level in main rather than trusting the renderer:
+    // an unrecognised value must fall back to the safest working default, not
+    // be written to disk where api-handler would later read it back.
+    const merged = { ...settings };
+    const level = settings && settings.privacy && settings.privacy.level;
+    merged.privacy = {
+      ...(settings.privacy || {}),
+      level: ['standard', 'strict', 'local'].includes(level) ? level : 'standard',
+    };
+
+    // Route key material to the encrypted store and keep it out of settings.json
+    // entirely — including defensively, if a future caller passes one in.
+    for (const field of secureStore.KEY_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(merged, field)) {
+        secureStore.setSecret(field, merged[field]);
+        delete merged[field];
+      }
+    }
+
+    fs.writeFileSync(settingsFile, JSON.stringify(merged, null, 2));
     return { success: true };
   } catch (error) {
     console.error('Error saving settings:', error);
@@ -635,6 +668,10 @@ ipcMain.handle('connect-database', async (event, { type, config }) => {
     try {
       const dbFile = path.join(settingsDir, 'data.duckdb');
       await duckdbClient.reset(dbFile);
+      // Column profiles describe data that no longer exists once the file is
+      // wiped. The cache key includes the row count, but a re-import with the
+      // same shape and different values would otherwise reuse a stale profile.
+      profiler.clearProfileCache();
       console.log('🧹 Pre-connect cleanup: DuckDB wiped for fresh start');
     } catch (e) { console.log('⚠️ Pre-connect cleanup skipped:', e.message); }
 
