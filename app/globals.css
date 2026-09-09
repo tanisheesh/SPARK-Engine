@@ -1,0 +1,288 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   SPARK — visual language
+
+   A working instrument, not a landing page. Hierarchy comes from
+   contrast, type and spacing. Colour, glow and shadow are not
+   used to create hierarchy; they are used to mark state, rarely.
+   ============================================================ */
+
+:root {
+  /* --- Ground. Warm charcoal, never blue-black. --- */
+  --bg:          #141515;
+  --surface:     #191A1A;
+  --surface-2:   #1E1F1F;
+  --surface-3:   #232424;
+
+  /* --- Lines carry the structure, so there are two weights only. --- */
+  --line:        #303131;
+  --line-subtle: #272828;
+
+  /* --- Three text weights. Anything else is a mistake. --- */
+  --text:        #E8E7E2;
+  --text-2:      #A3A39D;
+  --text-3:      #70716C;
+
+  /* --- One accent: muted sage. Roughly 10% of the surface area. --- */
+  --accent:      #8FA17C;
+  --accent-hi:   #A0B18D;
+  --accent-lo:   #7C8D6A;
+  --accent-ink:  #141515;               /* type on an accent fill */
+  --accent-soft: rgba(143, 161, 124, 0.11);
+  --accent-line: rgba(143, 161, 124, 0.34);
+
+  /* --- Status. Muted, and never the only signal. --- */
+  --positive:    #8FA17C;
+  --negative:    #B4776A;
+  --warning:     #B39A63;
+  --info:        #7189A3;
+  --idle:        #70716C;
+
+  /* --- Geometry. Restrained; pills are for tags and status only. --- */
+  --r-xs: 3px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 7px;
+  --r-xl: 8px;
+  --r-2xl: 10px;
+
+  /* --- Depth only where something genuinely floats. --- */
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-overlay: 0 16px 40px -12px rgba(0, 0, 0, 0.62);
+
+  /* --- Motion. Short, ease-out, only to explain a state change. --- */
+  --dur-1: 120ms;
+  --dur-2: 170ms;
+  --dur-3: 220ms;
+  --ease: cubic-bezier(0.16, 0.84, 0.44, 1);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden; /* the panes scroll; the page never does */
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Anything the database says wears the mono face. */
+code,
+kbd,
+pre,
+samp,
+.mono {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  font-feature-settings: "zero" 1;
+}
+
+/* Figures that get compared must line up. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one uppercase treatment in the product. Used for section
+   labels only — never for buttons, never for headings. */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* ---------- Focus. Present, quiet, never removed. ---------- */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-sm);
+}
+
+/* ---------- Scrollbars. Present only while in use. ---------- */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 99px;
+  border: 3.5px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3D3E3E;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+::selection {
+  background: rgba(143, 161, 124, 0.24);
+  color: var(--text);
+}
+
+/* ============================================================
+   Motion — four behaviours, all short, all ease-out.
+   Nothing loops unless it reports a live state.
+   ============================================================ */
+
+@keyframes s-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.a-rise {
+  animation: s-rise var(--dur-3) var(--ease) both;
+}
+
+@keyframes s-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.a-in {
+  animation: s-in var(--dur-2) var(--ease) both;
+}
+
+/* Live: the microphone is open. A bar meter, not a glow. */
+@keyframes s-meter {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.a-meter {
+  animation: s-meter 900ms var(--ease) infinite;
+  transform-origin: center;
+}
+
+/* Live: a pipeline stage is in flight. A travelling tick on the rail. */
+@keyframes s-rail {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+.a-rail::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 25%;
+  background: var(--accent);
+  opacity: 0.5;
+  animation: s-rail 1.5s var(--ease) infinite;
+}
+
+/* Loading: a skeleton, not a spinner, wherever shape is known. */
+@keyframes s-sheen {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.a-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 30%,
+    var(--surface-3) 50%,
+    var(--surface-2) 70%
+  );
+  background-size: 200% 100%;
+  animation: s-sheen 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   ReactFlow — the schema canvas is part of the product, so it
+   inherits the same surfaces, lines and radii.
+   ============================================================ */
+.react-flow__attribution {
+  display: none !important;
+}
+.react-flow__controls {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  box-shadow: none;
+}
+.react-flow__controls-button {
+  background: var(--surface-2) !important;
+  border-bottom: 1px solid var(--line-subtle) !important;
+  color: var(--text-2) !important;
+  width: 26px;
+  height: 26px;
+}
+.react-flow__controls-button:hover {
+  background: var(--surface-3) !important;
+  color: var(--text) !important;
+}
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+.react-flow__edge-path {
+  stroke: var(--line);
+}
