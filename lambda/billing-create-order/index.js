@@ -1,5 +1,5 @@
 const { client, TABLES, PutCommand } = require('../shared/dynamo');
-const { userIdFrom, json } = require('../shared/auth');
+const { userIdFrom, json, parseJsonBody } = require('../shared/auth');
 const { priceFor } = require('../shared/tiers');
 const { createOrder } = require('../shared/razorpay');
 
@@ -13,7 +13,7 @@ const VALID_CYCLES = ['monthly', 'yearly'];
 exports.handler = async (event) => {
   try {
     const userId = userIdFrom(event);
-    const body = JSON.parse(event.body || '{}');
+    const body = parseJsonBody(event);
     const tier = String(body.tier || '').toUpperCase();
     const cycle = String(body.cycle || '').toLowerCase();
 

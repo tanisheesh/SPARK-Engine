@@ -23,4 +23,20 @@ function json(statusCode, body) {
   };
 }
 
-module.exports = { userIdFrom, json };
+/** API Gateway (HTTP API) base64-encodes the request body for some
+    Content-Types and sets isBase64Encoded accordingly — plain
+    `JSON.parse(event.body)` silently breaks (throws on the base64 text)
+    whenever that happens. Every handler that reads a JSON body should
+    parse it through here instead. */
+function rawBody(event) {
+  return event.isBase64Encoded
+    ? Buffer.from(event.body || '', 'base64').toString('utf8')
+    : event.body || '';
+}
+
+function parseJsonBody(event) {
+  const text = rawBody(event);
+  return text ? JSON.parse(text) : {};
+}
+
+module.exports = { userIdFrom, json, rawBody, parseJsonBody };

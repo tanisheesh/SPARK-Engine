@@ -1,5 +1,5 @@
 const { client, TABLES, PutCommand } = require('../shared/dynamo');
-const { json } = require('../shared/auth');
+const { json, rawBody: getRawBody } = require('../shared/auth');
 const { verifyWebhookSignature } = require('../shared/razorpay');
 const { addCycle } = require('../shared/billing');
 
@@ -15,7 +15,7 @@ const { addCycle } = require('../shared/billing');
 exports.handler = async (event) => {
   try {
     const signature = event.headers?.['x-razorpay-signature'] || event.headers?.['X-Razorpay-Signature'];
-    const rawBody = event.body || '';
+    const rawBody = getRawBody(event);
     if (!signature || !verifyWebhookSignature({ rawBody, signature })) {
       return json(400, { error: 'Invalid webhook signature' });
     }
