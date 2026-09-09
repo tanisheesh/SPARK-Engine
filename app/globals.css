@@ -3,11 +3,20 @@
 @tailwind utilities;
 
 :root {
-  --primary: #D97706;
-  --secondary: #8B5CF6;
-  --tertiary: #E9D5FF;
-  --neutral: #1A1221;
-  --bg-dark: #0f0a1a;
+  /* SPARK design system — sage green on near-black */
+  --bg-primary:   #0A0A0A;
+  --bg-panel:     #141414;
+  --bg-elevated:  #1A1A1A;
+  --border:       #2A2A2A;
+  --accent:       #A9C08E;
+  --accent-dim:   #7A9065;
+  --text:         #F5F5F5;
+  --text-muted:   #9A9A9A;
+  --text-faint:   #6A6A6A;
+
+  /* legacy compat */
+  --primary: #A9C08E;
+  --bg-dark: #0A0A0A;
 }
 
 body {
@@ -31,23 +40,23 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(217, 119, 6, 0.3);
+  background: rgba(169, 192, 142, 0.25);
   border-radius: 4px;
-  border: 1px solid rgba(217, 119, 6, 0.1);
+  border: 1px solid rgba(169, 192, 142, 0.1);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(217, 119, 6, 0.5);
+  background: rgba(169, 192, 142, 0.45);
 }
 
 ::-webkit-scrollbar-corner {
-  background: rgba(26, 18, 33, 0.5);
+  background: #141414;
 }
 
 /* Hide scrollbar for Firefox */
 html {
   scrollbar-width: thin;
-  scrollbar-color: rgba(217, 119, 6, 0.3) rgba(26, 18, 33, 0.5);
+  scrollbar-color: rgba(169, 192, 142, 0.25) #141414;
 }
 
 /* Hide default scrollbars completely if needed */

@@ -1,42 +1,101 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { useEffect, useRef } from 'react';
+import { motion, useAnimation, useReducedMotion } from 'framer-motion';
 
 const CX = 200;
 const CY = 200;
 
 function pt(angleDeg: number, r: number) {
-  const rad = ((angleDeg - 90) * Math.PI) / 180; // -90 so 0° = top (North)
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
   return { x: CX + Math.cos(rad) * r, y: CY + Math.sin(rad) * r };
 }
 
-function diamondPath(angleDeg: number, len: number, halfWidth: number) {
-  const tip = pt(angleDeg, len);
-  const left = pt(angleDeg - 90, halfWidth);
-  const right = pt(angleDeg + 90, halfWidth);
-  const base = pt(angleDeg, halfWidth * 0.4);
-  return `M ${tip.x} ${tip.y} L ${left.x} ${left.y} L ${base.x} ${base.y} L ${right.x} ${right.y} Z`;
+function spokePath(angleDeg: number, length: number) {
+  const end = pt(angleDeg, length);
+  return `M ${CX} ${CY} L ${end.x} ${end.y}`;
 }
 
-// Cardinal spokes: N, E, S, W
-const CARDINAL = [0, 90, 180, 270];
-// Diagonal spokes: NE, SE, SW, NW
-const DIAGONAL = [45, 135, 225, 315];
-// Minor spokes: halfway between diagonals
-const MINOR = [22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5];
+const CARDINAL  = [0, 90, 180, 270];
+const DIAGONAL  = [45, 135, 225, 315];
+const MINOR     = [22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5];
 
-export default function SparkCompass({ size = 420 }: { size?: number }) {
+interface Props {
+  size?: number;
+  /** If true, plays the draw-in reveal sequence. Default false = just idle. */
+  animate?: boolean;
+}
+
+export default function SparkCompass({ size = 400, animate: doAnimate = true }: Props) {
+  const prefersReduced = useReducedMotion();
+
+  const cardinalCtrl = useAnimation();
+  const diagCtrl     = useAnimation();
+  const minorCtrl    = useAnimation();
+  const centerCtrl   = useAnimation();
+  const breathCtrl   = useAnimation();
+
+  useEffect(() => {
+    if (prefersReduced || !doAnimate) {
+      // Static state
+      cardinalCtrl.set({ pathLength: 1, opacity: 0.9 });
+      diagCtrl.set({ pathLength: 1, opacity: 0.45 });
+      minorCtrl.set({ pathLength: 1, opacity: 0.2 });
+      centerCtrl.set({ scale: 1, opacity: 1 });
+      return;
+    }
+
+    async function sequence() {
+      // 1. Cardinal spokes draw in
+      await cardinalCtrl.start({
+        pathLength: 1,
+        opacity: 0.9,
+        transition: { duration: 1.2, ease: [0.16, 1, 0.3, 1] },
+      });
+      // 2. Diagonal spokes
+      diagCtrl.start({
+        pathLength: 1,
+        opacity: 0.45,
+        transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] },
+      });
+      // 3. Minor spokes
+      minorCtrl.start({
+        pathLength: 1,
+        opacity: 0.18,
+        transition: { duration: 0.6, ease: 'easeOut' },
+      });
+      // 4. Center spark
+      centerCtrl.start({
+        scale: 1,
+        opacity: 1,
+        transition: { duration: 0.4, ease: 'easeOut' },
+      });
+
+      // 5. Idle breathing loop
+      await new Promise(r => setTimeout(r, 400));
+      breathCtrl.start({
+        opacity: [0.85, 1, 0.85],
+        transition: { duration: 4, ease: 'easeInOut', repeat: Infinity },
+      });
+    }
+
+    sequence();
+  }, [prefersReduced, doAnimate, cardinalCtrl, diagCtrl, minorCtrl, centerCtrl, breathCtrl]);
+
+  const GLOW = 'rgba(169,192,142,0.55)';
+
   return (
-    <div className="relative" style={{ width: size, height: size }}>
-      {/* Ambient glow behind the compass */}
-      <motion.div
-        className="absolute inset-0 rounded-full pointer-events-none"
+    <div style={{ width: size, height: size, position: 'relative' }}>
+      {/* Radial bloom */}
+      <div
         style={{
-          background: 'radial-gradient(circle at 50% 50%, rgba(217,119,6,0.18) 0%, rgba(139,92,246,0.08) 40%, transparent 70%)',
-          filter: 'blur(20px)',
+          position: 'absolute',
+          inset: 0,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle at 50% 50%, rgba(169,192,142,0.09) 0%, transparent 65%)',
+          filter: 'blur(24px)',
+          pointerEvents: 'none',
         }}
-        animate={{ opacity: [0.7, 1, 0.7] }}
-        transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       <motion.svg
@@ -44,113 +103,119 @@ export default function SparkCompass({ size = 420 }: { size?: number }) {
         width={size}
         height={size}
         fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        animate={{ rotate: [0, 360] }}
-        transition={{ duration: 120, repeat: Infinity, ease: 'linear' }}
         style={{ position: 'absolute', inset: 0 }}
+        animate={breathCtrl}
       >
         {/* Concentric reference rings */}
-        {[60, 100, 145, 178].map((r) => (
+        {[60, 105, 155, 185].map((r) => (
           <circle
             key={r}
             cx={CX} cy={CY} r={r}
-            stroke="rgba(217,119,6,0.06)"
-            strokeWidth="0.8"
-            strokeDasharray="2 4"
+            stroke="rgba(169,192,142,0.06)"
+            strokeWidth="0.6"
+            strokeDasharray="3 5"
           />
         ))}
 
-        {/* Minor spokes — thin, short, muted purple */}
-        {MINOR.map((a) => {
-          const end = pt(a, 72);
-          return (
-            <line
-              key={`minor-${a}`}
-              x1={CX} y1={CY}
-              x2={end.x} y2={end.y}
-              stroke="rgba(139,92,246,0.22)"
-              strokeWidth="0.9"
+        {/* Minor spokes — thin, very muted */}
+        {MINOR.map((a) => (
+          <motion.path
+            key={`m${a}`}
+            d={spokePath(a, 68)}
+            stroke={GLOW}
+            strokeWidth="0.8"
+            strokeLinecap="round"
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={minorCtrl}
+          />
+        ))}
+
+        {/* Diagonal spokes — medium */}
+        {DIAGONAL.map((a) => (
+          <motion.path
+            key={`d${a}`}
+            d={spokePath(a, 110)}
+            stroke="#A9C08E"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={diagCtrl}
+          />
+        ))}
+
+        {/* Cardinal spokes — main, bright, with glow layer */}
+        {CARDINAL.map((a) => (
+          <g key={`c${a}`}>
+            {/* glow */}
+            <motion.path
+              d={spokePath(a, 165)}
+              stroke="rgba(169,192,142,0.18)"
+              strokeWidth="8"
               strokeLinecap="round"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={cardinalCtrl}
             />
-          );
-        })}
-
-        {/* Diagonal spokes — medium, orange-tinted */}
-        {DIAGONAL.map((a) => {
-          const end = pt(a, 108);
-          return (
-            <g key={`diag-${a}`}>
-              <line
-                x1={CX} y1={CY}
-                x2={end.x} y2={end.y}
-                stroke="rgba(217,119,6,0.28)"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-              {/* Small diamond tip on diagonal */}
-              <path
-                d={diamondPath(a, 110, 4)}
-                fill="rgba(217,119,6,0.35)"
-              />
-            </g>
-          );
-        })}
-
-        {/* Cardinal spokes — main, bright orange, with bold diamond tips */}
-        {CARDINAL.map((a) => {
-          const end = pt(a, 158);
-          return (
-            <g key={`card-${a}`}>
-              {/* Glow layer */}
-              <line
-                x1={CX} y1={CY}
-                x2={end.x} y2={end.y}
-                stroke="rgba(217,119,6,0.12)"
-                strokeWidth="10"
-                strokeLinecap="round"
-              />
-              {/* Solid line */}
-              <line
-                x1={CX} y1={CY}
-                x2={end.x} y2={end.y}
-                stroke="rgba(217,119,6,0.75)"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              {/* Bold diamond tip */}
-              <path
-                d={diamondPath(a, 162, 9)}
-                fill="#D97706"
-                opacity="0.9"
-              />
-            </g>
-          );
-        })}
+            {/* solid */}
+            <motion.path
+              d={spokePath(a, 165)}
+              stroke="#A9C08E"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={cardinalCtrl}
+            />
+            {/* tip diamond */}
+            <motion.path
+              d={(() => {
+                const tip  = pt(a, 170);
+                const l    = pt(a - 90, 6);
+                const r2   = pt(a + 90, 6);
+                const base = pt(a, 152);
+                return `M ${tip.x} ${tip.y} L ${l.x} ${l.y} L ${base.x} ${base.y} L ${r2.x} ${r2.y} Z`;
+              })()}
+              fill="#A9C08E"
+              initial={{ opacity: 0 }}
+              animate={cardinalCtrl}
+            />
+          </g>
+        ))}
       </motion.svg>
 
-      {/* Center spark — does NOT rotate */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        {/* Outer pulse rings */}
+      {/* Center spark — static, doesn't rotate */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
         {[1, 2, 3].map((i) => (
           <motion.div
             key={i}
-            className="absolute rounded-full"
-            style={{ border: '1px solid rgba(217,119,6,0.25)' }}
-            animate={{ width: [24, 80], height: [24, 80], opacity: [0.6, 0] }}
-            transition={{ duration: 2.5, repeat: Infinity, delay: i * 0.7, ease: 'easeOut' }}
+            style={{
+              position: 'absolute',
+              borderRadius: '50%',
+              border: '1px solid rgba(169,192,142,0.3)',
+            }}
+            animate={doAnimate && !prefersReduced ? { width: [20, 64], height: [20, 64], opacity: [0.5, 0] } : { width: 20, height: 20, opacity: 0.15 }}
+            transition={{ duration: 2.5, repeat: Infinity, delay: i * 0.75, ease: 'easeOut' }}
           />
         ))}
-        {/* Core glow */}
         <motion.div
-          className="absolute rounded-full"
-          style={{ width: 36, height: 36, background: 'radial-gradient(circle, rgba(217,119,6,0.6) 0%, rgba(139,92,246,0.2) 60%, transparent 100%)' }}
-          animate={{ scale: [1, 1.25, 1] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          style={{
+            position: 'absolute',
+            width: 32, height: 32,
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(169,192,142,0.5) 0%, transparent 70%)',
+          }}
+          animate={doAnimate && !prefersReduced ? { scale: [1, 1.3, 1] } : { scale: 1 }}
+          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          initial={{ scale: 0, opacity: 0 }}
         />
-        {/* Bright center dot */}
-        <div
-          className="relative rounded-full"
-          style={{ width: 10, height: 10, background: '#D97706', boxShadow: '0 0 12px 4px rgba(217,119,6,0.7)' }}
+        <motion.div
+          style={{
+            position: 'relative',
+            width: 7, height: 7,
+            borderRadius: '50%',
+            background: '#A9C08E',
+            boxShadow: '0 0 10px 3px rgba(169,192,142,0.6)',
+          }}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={centerCtrl}
         />
       </div>
     </div>

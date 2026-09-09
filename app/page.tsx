@@ -1,38 +1,30 @@
 import type { Metadata } from 'next';
 import Navbar from '../components/landing/Navbar';
 import Hero from '../components/landing/Hero';
-import TrustStrip from '../components/landing/TrustStrip';
-import Problem from '../components/landing/Problem';
-import VoiceToInsight from '../components/landing/VoiceToInsight';
-import ProductSnapshots from '../components/landing/ProductSnapshots';
-import Privacy from '../components/landing/Privacy';
-import DataSources from '../components/landing/DataSources';
-import FeatureBento from '../components/landing/FeatureBento';
-import Architecture from '../components/landing/Architecture';
-import WhyDesktop from '../components/landing/WhyDesktop';
-import UseCases from '../components/landing/UseCases';
+import ProductPreview from '../components/landing/ProductPreview';
+import HowItWorks from '../components/landing/HowItWorks';
+import StudioGrid from '../components/landing/StudioGrid';
+import Manifesto from '../components/landing/Manifesto';
 import FinalCTA from '../components/landing/FinalCTA';
 import Footer from '../components/landing/Footer';
 
 export const metadata: Metadata = {
   title: 'SPARK Engine — Talk to Your Data',
   description:
-    'SPARK Engine is a voice-first data analytics desktop app. Ask your CSV, MySQL, PostgreSQL, or SQLite data questions in plain English and get answers without writing SQL.',
+    'Ask your CSV, database, or data source questions in plain English. SPARK writes the SQL, runs it locally, and explains what it found.',
   keywords: [
-    'voice analytics',
-    'AI SQL',
+    'AI analytics',
     'natural language SQL',
     'database AI',
     'voice to SQL',
     'data analytics',
-    'DuckDB analytics',
-    'AI database assistant',
+    'DuckDB',
     'conversational analytics',
   ],
   openGraph: {
     title: 'SPARK Engine — Talk to Your Data',
     description:
-      'Ask your data questions in plain English. SPARK turns your voice into SQL, runs it locally, and speaks the answer back.',
+      'Ask your data questions in plain English. SPARK turns your question into SQL, runs it locally, and explains the answer.',
     type: 'website',
   },
   twitter: {
@@ -44,39 +36,15 @@ export const metadata: Metadata = {
 
 export default function LandingPage() {
   return (
-    <div
-      className="min-h-screen"
-      style={{ background: '#0f0a1a', color: '#e2e8f0' }}
-    >
-      {/* Subtle background grid */}
-      <div
-        className="fixed inset-0 pointer-events-none z-0"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, rgba(26,18,33,0.3) 1px, transparent 1px), linear-gradient(to bottom, rgba(26,18,33,0.3) 1px, transparent 1px)',
-          backgroundSize: '6rem 6rem',
-          maskImage: 'radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%)',
-          WebkitMaskImage:
-            'radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%)',
-        }}
-      />
-
-      <div className="relative z-10">
-        <Navbar />
-        <Hero />
-        <TrustStrip />
-        <Problem />
-        <VoiceToInsight />
-        <ProductSnapshots />
-        <Privacy />
-        <DataSources />
-        <FeatureBento />
-        <Architecture />
-        <WhyDesktop />
-        <UseCases />
-        <FinalCTA />
-        <Footer />
-      </div>
+    <div style={{ background: '#0A0A0A', color: '#F5F5F5' }}>
+      <Navbar />
+      <Hero />
+      <ProductPreview />
+      <HowItWorks />
+      <StudioGrid />
+      <Manifesto />
+      <FinalCTA />
+      <Footer />
     </div>
   );
 }
