@@ -18,9 +18,9 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
+    "@duckdb/node-api": "^1.5.5-r.4",
     "@supabase/supabase-js": "^2.103.3",
     "@types/papaparse": "^5.5.2",
-    "adm-zip": "^0.5.16",
     "annyang": "^2.6.1",
     "better-sqlite3": "^12.6.0",
     "dagre": "^0.8.5",

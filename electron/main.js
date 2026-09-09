@@ -1,10 +1,6 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
-const { exec } = require('child_process');
-const util = require('util');
-const execAsync = util.promisify(exec);
 
 // Optional auto-updater (only if available)
 let autoUpdater = null;
@@ -17,14 +13,14 @@ try {
   console.log('   This is normal for development builds');
 }
 
-// Import API handler and DuckDB installer
+// Import API handler and DuckDB client
 const { setMainWindow } = require('./api-handler');
-const { ensureDuckDB } = require('./duckdb-installer');
+const duckdbClient = require('./duckdb-client');
 const { performSystemCheck } = require('./system-check');
 const DatabaseConnector = require('./database-connector');
 
-// App settings directory
-const settingsDir = path.join(os.homedir(), 'AppData', 'Roaming', 'spark-engine');
+// App settings directory - cross-platform (Windows: %APPDATA%, macOS: ~/Library/Application Support)
+const settingsDir = app.getPath('userData');
 const settingsFile = path.join(settingsDir, 'settings.json');
 const uploadsDir = path.join(settingsDir, 'uploads');
 
@@ -80,26 +76,7 @@ function createWindow() {
     
     // Set mainWindow reference in API handler
     setMainWindow(mainWindow);
-    
-    // Auto-install DuckDB if needed (silent)
-    try {
-      const duckdbSuccess = await ensureDuckDB();
-      if (!duckdbSuccess) {
-        console.error('⚠️ DuckDB installation failed - some features may not work');
-        // Show user notification about DuckDB issue
-        mainWindow.webContents.send('system-notification', {
-          type: 'warning',
-          message: 'Database engine installation failed. Please restart the application or install DuckDB manually.'
-        });
-      }
-    } catch (error) {
-      console.error('❌ DuckDB setup error:', error);
-      mainWindow.webContents.send('system-notification', {
-        type: 'error',
-        message: 'Database setup failed. Some features may not work properly.'
-      });
-    }
-    
+
     // Check for updates
     if (!isDev && autoUpdater) {
       try {
@@ -169,17 +146,8 @@ app.whenReady().then(async () => {
   console.log('🧹 Cleaning up DuckDB from previous session...');
   try {
     const dbFile = path.join(settingsDir, 'data.duckdb');
-    if (fs.existsSync(dbFile)) {
-      // Delete the entire DuckDB file for fresh start
-      fs.unlinkSync(dbFile);
-      console.log('✅ DuckDB cleaned up successfully');
-    }
-    
-    // Also clean up WAL files if they exist
-    const walFile = dbFile + '.wal';
-    if (fs.existsSync(walFile)) {
-      fs.unlinkSync(walFile);
-    }
+    await duckdbClient.reset(dbFile);
+    console.log('✅ DuckDB cleaned up successfully');
 
     // Clean up csv_data directory (old SQLite/DB exported CSVs)
     const csvDataDir = path.join(settingsDir, 'csv_data');
@@ -209,6 +177,11 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+
+// Release the DuckDB file lock cleanly before the process exits
+app.on('before-quit', () => {
+  duckdbClient.closeSync();
 });
 
 // IPC handlers
@@ -312,24 +285,7 @@ ipcMain.handle('upload-csv', async (event) => {
         const dbFile = path.join(settingsDir, 'data.duckdb');
         const safeDbFile = path.resolve(dbFile);
         const tableName = safeFileName.replace(/[^a-zA-Z0-9_]/g, '_').replace(/\.csv$/i, '');
-        
-        // Find DuckDB executable
-        let duckdbCommand = 'duckdb';
-        const appDir = path.dirname(process.execPath);
-        const possiblePaths = [
-          path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-          path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-        ];
-        
-        for (const duckdbPath of possiblePaths) {
-          if (fs.existsSync(duckdbPath)) {
-            duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-            break;
-          }
-        }
-        
-        const { exec } = require('child_process');
-        
+
         // Import CSV in background for large files (don't block UI)
         console.log(`📊 Starting CSV import for large file: ${safeFileName} (${(stats.size / (1024*1024*1024)).toFixed(2)}GB)`);
         mainWindow.webContents.send('upload-progress', {
@@ -337,29 +293,26 @@ ipcMain.handle('upload-csv', async (event) => {
           progress: 50,
           message: 'Importing CSV into database (this may take a few minutes)...'
         });
-        
-        const createTableCmd = `${duckdbCommand} "${safeDbFile}" -c "CREATE OR REPLACE TABLE ${tableName} AS SELECT * FROM '${path.resolve(sourcePath)}'"`;
-        
-        // Run import in background
-        exec(createTableCmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
-          if (error) {
-            console.error('❌ Failed to import CSV into DuckDB:', error);
-            mainWindow.webContents.send('upload-progress', {
-              stage: 'error',
-              progress: 0,
-              message: `Import failed: ${error.message}`
-            });
-          } else {
+
+        duckdbClient.importCSV(safeDbFile, tableName, path.resolve(sourcePath))
+          .then(() => {
             console.log(`✅ CSV imported into DuckDB as table: ${tableName}`);
             mainWindow.webContents.send('upload-progress', {
               stage: 'complete',
               progress: 100,
               message: 'CSV imported successfully!'
             });
-          }
-        });
-        
-        return { 
+          })
+          .catch((error) => {
+            console.error('❌ Failed to import CSV into DuckDB:', error);
+            mainWindow.webContents.send('upload-progress', {
+              stage: 'error',
+              progress: 0,
+              message: `Import failed: ${error.message}`
+            });
+          });
+
+        return {
           success: true, 
           fileName: safeFileName, 
           path: path.resolve(sourcePath), // Use original path
@@ -428,30 +381,9 @@ ipcMain.handle('upload-csv', async (event) => {
           const dbFile = path.join(settingsDir, 'data.duckdb');
           const safeDbFile = path.resolve(dbFile);
           const tableName = safeFileName.replace(/[^a-zA-Z0-9_]/g, '_').replace(/\.csv$/i, '');
-          
-          // Find DuckDB executable
-          let duckdbCommand = 'duckdb';
-          const appDir = path.dirname(process.execPath);
-          const possiblePaths = [
-            path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-            path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-          ];
-          
-          for (const duckdbPath of possiblePaths) {
-            if (fs.existsSync(duckdbPath)) {
-              duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-              break;
-            }
-          }
-          
-          const { exec } = require('child_process');
-          const { promisify } = require('util');
-          const execAsync = promisify(exec);
-          
-          // Create table from CSV
-          const createTableCmd = `${duckdbCommand} "${safeDbFile}" -c "CREATE OR REPLACE TABLE ${tableName} AS SELECT * FROM '${destPath}'"`;
-          await execAsync(createTableCmd, { timeout: 120000 });
-          
+
+          await duckdbClient.importCSV(safeDbFile, tableName, destPath);
+
           console.log(`✅ CSV imported into DuckDB as table: ${tableName}`);
         } catch (importError) {
           console.error('Failed to import CSV into DuckDB:', importError);
@@ -593,38 +525,16 @@ ipcMain.handle('delete-csv', (event, fileName) => {
 ipcMain.handle('import-csv-to-duckdb', async (event, { filePath, fileName }) => {
   try {
     console.log(`📊 Starting CSV import: ${fileName}`);
-    
+
     const dbFile = path.join(settingsDir, 'data.duckdb');
     const safeDbFile = path.resolve(dbFile);
     const tableName = fileName.replace(/[^a-zA-Z0-9_]/g, '_').replace(/\.csv$/i, '');
-    
-    // Find DuckDB executable
-    let duckdbCommand = 'duckdb';
-    const appDir = path.dirname(process.execPath);
-    const possiblePaths = [
-      path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-      path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-    ];
-    
-    for (const duckdbPath of possiblePaths) {
-      if (fs.existsSync(duckdbPath)) {
-        duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-        break;
-      }
-    }
-    
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
-    const execAsync = promisify(exec);
-    
-    // Create table from CSV
-    const createTableCmd = `${duckdbCommand} "${safeDbFile}" -c "CREATE OR REPLACE TABLE ${tableName} AS SELECT * FROM '${path.resolve(filePath)}'"`;
-    
+
     console.log(`🔄 Importing CSV into DuckDB table: ${tableName}`);
-    await execAsync(createTableCmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 });
-    
+    await duckdbClient.importCSV(safeDbFile, tableName, path.resolve(filePath));
+
     console.log(`✅ CSV imported successfully as table: ${tableName}`);
-    
+
     return {
       success: true,
       tableName: tableName,
@@ -643,71 +553,25 @@ ipcMain.handle('import-csv-to-duckdb', async (event, { filePath, fileName }) => 
 ipcMain.handle('disconnect-database', async (event, { type }) => {
   try {
     console.log(`🔌 Disconnecting ${type}...`);
-    
+
     const dbFile = path.join(settingsDir, 'data.duckdb');
     const safeDbFile = path.resolve(dbFile);
-    
-    // Find DuckDB executable
-    let duckdbCommand = 'duckdb';
-    const appDir = path.dirname(process.execPath);
-    const possiblePaths = [
-      path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-      path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-    ];
-    
-    for (const duckdbPath of possiblePaths) {
-      if (fs.existsSync(duckdbPath)) {
-        duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-        break;
-      }
-    }
-    
-    // Get table prefix based on type
-    let prefix = '';
-    if (type === 'mysql') prefix = 'mysql_%';
-    else if (type === 'sqlite') prefix = 'sqlite_%';
-    else if (type === 'postgresql') prefix = 'postgres_%';
+
+    let whereExtra;
+    if (type === 'mysql') whereExtra = `table_name LIKE 'mysql_%'`;
+    else if (type === 'sqlite') whereExtra = `table_name LIKE 'sqlite_%'`;
+    else if (type === 'postgresql') whereExtra = `table_name LIKE 'postgres_%'`;
     else if (type === 'csv') {
-      // For CSV, drop all tables that don't have database prefixes
-      const cleanupSQL = `
-        SELECT 'DROP TABLE IF EXISTS ' || table_name || ';' as drop_stmt
-        FROM information_schema.tables 
-        WHERE table_schema='main' 
-        AND table_name NOT LIKE 'mysql_%' 
-        AND table_name NOT LIKE 'sqlite_%' 
-        AND table_name NOT LIKE 'postgres_%'
-      `;
-      
-      const { stdout: dropStmts } = await execAsync(`${duckdbCommand} "${safeDbFile}" -json -c "${cleanupSQL}"`, { timeout: 10000 });
-      const drops = JSON.parse(dropStmts.trim() || '[]');
-      
-      if (drops.length > 0) {
-        const dropSQL = drops.map(d => d.drop_stmt).join(' ');
-        await execAsync(`${duckdbCommand} "${safeDbFile}" -c "${dropSQL}"`, { timeout: 30000 });
-        console.log(`✅ Cleaned up ${drops.length} CSV tables`);
-      }
-      
-      return { success: true, message: `Disconnected from ${type}` };
+      whereExtra = `table_name NOT LIKE 'mysql_%' AND table_name NOT LIKE 'sqlite_%' AND table_name NOT LIKE 'postgres_%'`;
     }
-    
-    if (prefix) {
-      // Get all tables with this prefix
-      const cleanupSQL = `
-        SELECT 'DROP TABLE IF EXISTS ' || table_name || ';' as drop_stmt
-        FROM information_schema.tables 
-        WHERE table_schema='main' AND table_name LIKE '${prefix}'
-      `;
-      
-      const { stdout: dropStmts } = await execAsync(`${duckdbCommand} "${safeDbFile}" -json -c "${cleanupSQL}"`, { timeout: 10000 });
-      const drops = JSON.parse(dropStmts.trim() || '[]');
-      
-      if (drops.length > 0) {
-        const dropSQL = drops.map(d => d.drop_stmt).join(' ');
-        await execAsync(`${duckdbCommand} "${safeDbFile}" -c "${dropSQL}"`, { timeout: 30000 });
-        console.log(`✅ Cleaned up ${drops.length} ${type} tables`);
+
+    if (whereExtra) {
+      const dropped = await duckdbClient.dropTablesWhere(safeDbFile, whereExtra);
+      if (dropped > 0) {
+        console.log(`✅ Cleaned up ${dropped} ${type} tables`);
       }
     }
-    
+
     return { success: true, message: `Disconnected from ${type}` };
   } catch (error) {
     console.error('Error disconnecting:', error);
@@ -721,12 +585,10 @@ ipcMain.handle('connect-database', async (event, { type, config }) => {
     const DatabaseConnector = require('./database-connector');
     const connector = new DatabaseConnector();
 
-    // Always wipe ALL tables before connecting - delete and recreate DuckDB file
+    // Always wipe ALL tables before connecting - close connection and recreate DuckDB file
     try {
       const dbFile = path.join(settingsDir, 'data.duckdb');
-      if (fs.existsSync(dbFile)) fs.unlinkSync(dbFile);
-      const walFile = dbFile + '.wal';
-      if (fs.existsSync(walFile)) fs.unlinkSync(walFile);
+      await duckdbClient.reset(dbFile);
       console.log('🧹 Pre-connect cleanup: DuckDB wiped for fresh start');
     } catch (e) { console.log('⚠️ Pre-connect cleanup skipped:', e.message); }
 
@@ -930,46 +792,22 @@ ipcMain.handle('get-database-schema', async (event, { connectionType, connection
       
     } else {
       // For CSV or unknown types, use DuckDB
-      const { exec } = require('child_process');
-      const { promisify } = require('util');
-      const execPromise = promisify(exec);
-      
       const dbFile = path.join(settingsDir, 'data.duckdb');
       const safeDbFile = path.resolve(dbFile);
-      
-      // Find DuckDB executable
-      let duckdbCommand = 'duckdb';
-      const appDir = path.dirname(process.execPath);
-      const possiblePaths = [
-        path.join(appDir, process.platform === 'win32' ? 'duckdb.exe' : 'duckdb'),
-        path.join(process.cwd(), process.platform === 'win32' ? 'duckdb.exe' : 'duckdb')
-      ];
-      
-      for (const duckdbPath of possiblePaths) {
-        if (fs.existsSync(duckdbPath)) {
-          duckdbCommand = `"${path.resolve(duckdbPath)}"`;
-          break;
-        }
-      }
-      
+
       // Get all tables
-      const tablesSQL = `SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name NOT LIKE '%_schema'`;
-      const { stdout: tablesOutput } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "${tablesSQL}"`, { timeout: 10000 });
-      const tables = JSON.parse(tablesOutput.trim() || '[]');
-      
+      const tables = await duckdbClient.getTables(safeDbFile, `table_name NOT LIKE '%_schema'`);
+
       if (tables.length === 0) {
         return { success: false, error: 'No tables found in database' };
       }
-      
+
       const schema = {};
       const graph = {};
-      
+
       // Get columns for each table
       for (const { table_name } of tables) {
-        const columnsSQL = `SELECT column_name FROM information_schema.columns WHERE table_name='${table_name}' ORDER BY ordinal_position`;
-        const { stdout: columnsOutput } = await execPromise(`${duckdbCommand} "${safeDbFile}" -json -c "${columnsSQL}"`, { timeout: 10000 });
-        const columns = JSON.parse(columnsOutput.trim() || '[]');
-        
+        const columns = await duckdbClient.getColumns(safeDbFile, table_name);
         schema[table_name] = columns.map(c => c.column_name);
       }
       
