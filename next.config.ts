@@ -7,7 +7,9 @@ const nextConfig: NextConfig = {
     unoptimized: true
   },
   assetPrefix: './',
-  turbopack: {},
+  turbopack: {
+    root: __dirname,
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

@@ -59,7 +59,7 @@ function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
   
   // Always load from static build - no web server
-  const indexPath = path.join(__dirname, '../out/index.html');
+  const indexPath = path.join(__dirname, '../out/app/index.html');
   if (fs.existsSync(indexPath)) {
     mainWindow.loadFile(indexPath);
   } else {
