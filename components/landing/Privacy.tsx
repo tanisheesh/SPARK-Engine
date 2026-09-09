@@ -69,7 +69,7 @@ export default function Privacy() {
                 >
                   <p
                     className="font-semibold text-sm"
-                    style={{ color: node.accent ? '#F59E0B' : '#e2e8f0' }}
+                    style={{ color: node.accent ? '#D97706' : '#e2e8f0' }}
                   >
                     {node.label}
                   </p>

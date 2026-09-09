@@ -71,7 +71,7 @@ export default function UseCases() {
                   ? {
                       background: 'linear-gradient(135deg, rgba(217,119,6,0.2), rgba(124,58,237,0.15))',
                       border: '1px solid rgba(217,119,6,0.35)',
-                      color: '#F59E0B',
+                      color: '#D97706',
                     }
                   : {
                       background: 'rgba(26,18,33,0.6)',

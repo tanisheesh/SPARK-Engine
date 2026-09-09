@@ -165,7 +165,7 @@ export default function FeatureBento() {
                   style={{
                     background: 'rgba(217,119,6,0.1)',
                     border: '1px solid rgba(217,119,6,0.2)',
-                    color: '#F59E0B',
+                    color: '#D97706',
                   }}
                 >
                   {n}
@@ -234,7 +234,7 @@ export default function FeatureBento() {
                   style={{
                     background: 'rgba(217,119,6,0.06)',
                     border: '1px solid rgba(217,119,6,0.12)',
-                    color: '#F59E0B',
+                    color: '#D97706',
                   }}
                 >
                   <span>📌</span>
@@ -267,7 +267,7 @@ export default function FeatureBento() {
             <div className="flex-shrink-0 text-center">
               <div
                 className="text-3xl font-black font-mono"
-                style={{ color: '#F59E0B' }}
+                style={{ color: '#D97706' }}
               >
                 100 GB+
               </div>

@@ -5,11 +5,11 @@ import { motion } from 'framer-motion';
 const PIPELINE = [
   { label: 'Voice', color: '#D97706' },
   { label: 'Deepgram', color: '#9ca3af' },
-  { label: 'Groq / GPT-OSS 120B', color: '#a78bfa' },
-  { label: 'SQL Validation', color: '#F59E0B' },
+  { label: 'Groq / GPT-OSS 120B', color: '#8B5CF6' },
+  { label: 'SQL Validation', color: '#D97706' },
   { label: 'DuckDB', color: '#34d399' },
   { label: 'Results', color: '#D97706' },
-  { label: 'AI Response', color: '#a78bfa' },
+  { label: 'AI Response', color: '#8B5CF6' },
   { label: 'Inworld AI', color: '#9ca3af' },
   { label: 'Voice', color: '#D97706' },
 ];

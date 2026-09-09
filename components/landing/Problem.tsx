@@ -95,7 +95,7 @@ export default function Problem() {
               </span>
               <span
                 className="text-xs px-2 py-0.5 rounded-full font-mono"
-                style={{ background: 'rgba(217,119,6,0.15)', color: '#F59E0B' }}
+                style={{ background: 'rgba(217,119,6,0.15)', color: '#D97706' }}
               >
                 voice-first
               </span>

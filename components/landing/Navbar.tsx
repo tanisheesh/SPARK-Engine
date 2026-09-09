@@ -70,7 +70,7 @@ export default function Navbar() {
             GitHub
           </a>
           <a
-            href="#download"
+            href="/app"
             className="text-sm px-4 py-2 rounded-xl font-semibold text-white transition-all duration-200"
             style={{
               background: 'linear-gradient(135deg, #D97706, #7C3AED)',
@@ -120,7 +120,7 @@ export default function Navbar() {
             </a>
           ))}
           <a
-            href="#download"
+            href="/app"
             className="text-sm px-4 py-2.5 rounded-xl font-semibold text-white text-center mt-1"
             style={{ background: 'linear-gradient(135deg, #D97706, #7C3AED)' }}
             onClick={() => setMobileOpen(false)}

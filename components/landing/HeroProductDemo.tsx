@@ -194,7 +194,7 @@ export default function HeroProductDemo() {
                         : step === i + 1
                         ? '1px solid rgba(217,119,6,0.4)'
                         : '1px solid rgba(255,255,255,0.08)',
-                    color: step > i + 1 ? '#4ade80' : step === i + 1 ? '#F59E0B' : '#6b7280',
+                    color: step > i + 1 ? '#4ade80' : step === i + 1 ? '#D97706' : '#6b7280',
                   }}
                 >
                   {step > i + 1 ? '✓' : i + 1}
@@ -202,7 +202,7 @@ export default function HeroProductDemo() {
                 <span
                   style={{
                     color:
-                      step > i + 1 ? '#4ade80' : step === i + 1 ? '#F59E0B' : '#4b5563',
+                      step > i + 1 ? '#4ade80' : step === i + 1 ? '#D97706' : '#4b5563',
                   }}
                 >
                   {s.label}
@@ -277,9 +277,9 @@ export default function HeroProductDemo() {
                             line.trimStart().startsWith('GROUP') ||
                             line.trimStart().startsWith('ORDER') ||
                             line.trimStart().startsWith('LIMIT')
-                            ? '#F59E0B'
+                            ? '#D97706'
                             : line.includes('SUM') || line.includes('AS')
-                            ? '#a78bfa'
+                            ? '#8B5CF6'
                             : '#e2e8f0',
                         }}
                       >
@@ -308,7 +308,7 @@ export default function HeroProductDemo() {
                   style={{
                     borderColor: 'rgba(217,119,6,0.15)',
                     background: 'rgba(217,119,6,0.06)',
-                    color: '#F59E0B',
+                    color: '#D97706',
                   }}
                 >
                   <span>results</span>

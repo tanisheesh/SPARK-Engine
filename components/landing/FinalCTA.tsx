@@ -35,7 +35,7 @@ export default function FinalCTA() {
               <span
                 className="text-transparent bg-clip-text"
                 style={{
-                  backgroundImage: 'linear-gradient(135deg, #F59E0B, #D97706, #a78bfa)',
+                  backgroundImage: 'linear-gradient(135deg, #D97706, #D97706, #8B5CF6)',
                 }}
               >
                 you can simply ask.
