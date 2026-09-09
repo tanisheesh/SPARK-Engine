@@ -4,6 +4,7 @@ import Hero from '../components/landing/Hero';
 import TrustStrip from '../components/landing/TrustStrip';
 import Problem from '../components/landing/Problem';
 import VoiceToInsight from '../components/landing/VoiceToInsight';
+import ProductSnapshots from '../components/landing/ProductSnapshots';
 import Privacy from '../components/landing/Privacy';
 import DataSources from '../components/landing/DataSources';
 import FeatureBento from '../components/landing/FeatureBento';
@@ -66,6 +67,7 @@ export default function LandingPage() {
         <TrustStrip />
         <Problem />
         <VoiceToInsight />
+        <ProductSnapshots />
         <Privacy />
         <DataSources />
         <FeatureBento />
