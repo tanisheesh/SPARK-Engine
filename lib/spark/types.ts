@@ -141,15 +141,6 @@ export type VoiceState =
 
 /* ---------- Rows returned by the surrounding services ---------- */
 
-/** A row of the Supabase `saved_prompts` table. */
-export interface SavedPromptRow {
-  id: string;
-  user_id: string;
-  title: string;
-  prompt_text: string;
-  created_at: string;
-}
-
 /** An entry from the main process `list-csv-files` handler. */
 export interface CsvFileRow {
   name: string;

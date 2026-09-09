@@ -25,7 +25,6 @@ export interface AskHomeProps {
   onAsk: (q: string) => void;
   onSurprise: () => void;
   recents: string[];
-  saved: { id: string; title: string; prompt_text: string }[];
 }
 
 export function AskHome({
@@ -35,7 +34,6 @@ export function AskHome({
   onAsk,
   onSurprise,
   recents,
-  saved,
 }: AskHomeProps) {
   return (
     <div className="mx-auto w-full max-w-[640px] px-6 py-14">
@@ -95,19 +93,6 @@ export function AskHome({
             </div>
           </section>
         </>
-      )}
-
-      {saved.length > 0 && (
-        <section className="mt-8">
-          <h2 className="eyebrow mb-1">Saved</h2>
-          <ul className="m-0 list-none p-0">
-            {saved.slice(0, 4).map((s) => (
-              <li key={s.id}>
-                <Row label={s.title} sub={s.prompt_text} onClick={() => onAsk(s.prompt_text)} />
-              </li>
-            ))}
-          </ul>
-        </section>
       )}
 
       {recents.length > 0 && (

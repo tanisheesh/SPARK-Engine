@@ -10,7 +10,7 @@ import {
   type StudioAction,
   type StudioGroup,
 } from '../../lib/spark/studio';
-import type { Conversation, SavedPromptRow, Turn } from '../../lib/spark/types';
+import type { Conversation, Turn } from '../../lib/spark/types';
 import { relativeTime } from '../../lib/spark/format';
 import { Button, EmptyState, Spinner, cx } from '../ui/Primitives';
 import {
@@ -49,7 +49,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   surprise: IconSurprise,
 };
 
-type Tab = 'generate' | 'saved' | 'history';
+type Tab = 'generate' | 'history';
 
 export interface StudioPanelProps {
   turn: Turn | null;
@@ -59,8 +59,6 @@ export interface StudioPanelProps {
   onRun: (action: StudioAction) => void;
   onConnect: () => void;
 
-  savedPrompts: SavedPromptRow[];
-  onUseSaved: (prompt: string) => void;
   conversation: Conversation | null;
   onJumpToTurn: (turnId: string) => void;
 }
@@ -72,8 +70,6 @@ export function StudioPanel({
   runningAction,
   onRun,
   onConnect,
-  savedPrompts,
-  onUseSaved,
   conversation,
   onJumpToTurn,
 }: StudioPanelProps) {
@@ -93,7 +89,7 @@ export function StudioPanel({
       </header>
 
       <div className="flex gap-4 border-b border-line-subtle px-4">
-        {(['generate', 'saved', 'history'] as Tab[]).map((t) => (
+        {(['generate', 'history'] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -159,26 +155,6 @@ export function StudioPanel({
             <p className="px-2 pb-1 pt-2 text-xs leading-relaxed text-faint">
               Ask a question and these begin working on that answer.
             </p>
-          )}
-        </div>
-      ) : tab === 'saved' ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
-          {savedPrompts.length === 0 ? (
-            <p className="px-2 py-6 text-sm leading-relaxed text-faint">
-              Questions you save from the composer collect here.
-            </p>
-          ) : (
-            savedPrompts.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => onUseSaved(p.prompt_text)}
-                className="block w-full rounded-md px-2 py-1.5 text-left transition-colors duration-1 hover:bg-surface2"
-              >
-                <span className="block truncate text-base text-ink">{p.title}</span>
-                <span className="block truncate text-xs text-faint">{p.prompt_text}</span>
-              </button>
-            ))
           )}
         </div>
       ) : (

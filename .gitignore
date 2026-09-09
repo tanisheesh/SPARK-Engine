@@ -20,6 +20,7 @@ build/
 
 # Environment files
 .env*
+infra/aws/00-env.local.sh
 
 # Database files
 *.duckdb

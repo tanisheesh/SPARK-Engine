@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { useEffect, useRef, useState } from 'react';
+import { handleOAuthCallback, signInWithGoogle } from '../lib/auth';
 import { SparkMark } from './ui/Icons';
 import { Spinner } from './ui/Primitives';
 
@@ -9,61 +9,59 @@ interface LoginScreenProps {
   onLogin: () => void;
 }
 
+const LOGIN_TIMEOUT_MS = 3 * 60 * 1000;
+
 export default function LoginScreen({ onLogin }: LoginScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearLoginTimeout = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
 
   useEffect(() => {
-    // Listen for OAuth callback from Electron deep link
-    if (window.electronAPI?.onOAuthCallback) {
-      window.electronAPI.onOAuthCallback(async (_event: any, url: string) => {
-        try {
-          // Extract tokens from the deep link URL
-          const hashOrQuery = url.includes('#') ? url.split('#')[1] : url.split('?')[1];
-          const params = new URLSearchParams(hashOrQuery);
-          const accessToken = params.get('access_token');
-          const refreshToken = params.get('refresh_token');
+    // Listen for the Cognito Hosted UI callback from Electron's deep link —
+    // unchanged plumbing, only the URL that started the flow changed.
+    if (!window.electronAPI?.onOAuthCallback) return;
 
-          if (accessToken && refreshToken) {
-            const { error } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-            if (!error) onLogin();
-          }
-        } catch (err) {
-          console.error('OAuth callback error:', err);
-        }
-      });
-    }
+    window.electronAPI.onOAuthCallback(async (_event: any, url: string) => {
+      clearLoginTimeout();
+      try {
+        await handleOAuthCallback(url);
+        onLogin();
+      } catch (err) {
+        console.error('OAuth callback error:', err);
+        setError((err as Error).message || 'Login failed');
+        setLoading(false);
+      }
+    });
+
+    // Registered once per mount; without this the listener would pile up
+    // (and fire more than once per login) across any remount.
+    return () => {
+      window.electronAPI?.removeAllListeners('oauth-callback');
+      clearLoginTimeout();
+    };
   }, [onLogin]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: 'spark-engine://auth/callback',
-          skipBrowserRedirect: true,
-        },
-      });
-      if (error) throw error;
-      if (data?.url && window.electronAPI?.openExternal) {
-        await window.electronAPI.openExternal(data.url);
-        // Poll for session - works when deep link isn't available in dev mode
-        let attempts = 0;
-        const interval = setInterval(async () => {
-          attempts++;
-          const { data: sessionData } = await supabase.auth.getSession();
-          if (sessionData?.session) {
-            clearInterval(interval);
-            onLogin();
-          }
-          if (attempts > 150) clearInterval(interval); // 5 min timeout
-        }, 2000);
-      }
+      await signInWithGoogle();
+      // The deep-link listener above resolves the flow once Cognito
+      // redirects back to spark-engine://auth/callback. If that deep link
+      // never arrives (protocol not registered, browser closed, etc.) this
+      // timeout surfaces a recoverable error instead of hanging forever.
+      clearLoginTimeout();
+      timeoutRef.current = setTimeout(() => {
+        setLoading(false);
+        setError("Didn't hear back from your browser. Please try again.");
+      }, LOGIN_TIMEOUT_MS);
     } catch (err: any) {
       setError(err.message || 'Login failed');
       setLoading(false);
