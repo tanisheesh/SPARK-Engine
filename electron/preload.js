@@ -39,4 +39,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // OAuth callback
   onOAuthCallback: (callback) => ipcRenderer.on('oauth-callback', callback),
+
+  // Remote sessions (SPARK Mobile). No raw socket or relay handle is exposed
+  // to the renderer — only these named operations.
+  remoteStatus: () => ipcRenderer.invoke('remote-status'),
+  remoteConnect: (data) => ipcRenderer.invoke('remote-connect', data),
+  remoteDisconnect: () => ipcRenderer.invoke('remote-disconnect'),
+  remoteSetSource: (source) => ipcRenderer.invoke('remote-set-source', source),
+  syncConversations: (conversations) => ipcRenderer.invoke('remote-sync-conversations', conversations),
+  onRemoteStatus: (callback) => ipcRenderer.on('remote-status', callback),
+  onConversationsUpdated: (callback) => ipcRenderer.on('conversations-updated', callback),
 });

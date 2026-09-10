@@ -246,8 +246,19 @@ function composeLocalAnswer(question, rows) {
     : `Found ${n} results. The first is ${summary}. The full set is in the table below.`;
 }
 
-// Main query handler with progress updates
-ipcMain.handle('process-query', async (event, { question, csvFile, settings, voiceAllowed, wideTableColumnCap }) => {
+/* Main query pipeline.
+ *
+ * Extracted from the ipcMain handler below so that callers other than the
+ * renderer can run a question through the exact same path - specifically the
+ * remote-session bridge in electron/remote/, which serves questions arriving
+ * from the phone. Keeping one implementation is the point: a second copy of
+ * this pipeline would be a second place for the privacy guarantees to drift.
+ *
+ * `onProgress(stage, message)` is optional and additive - the renderer keeps
+ * receiving its 'query-progress' events exactly as before whether or not a
+ * remote caller is also listening.
+ */
+async function processQuery({ question, csvFile, settings, voiceAllowed, wideTableColumnCap, onProgress }) {
   try {
     // The privacy level is read from disk here, NOT taken from the renderer
     // argument. A renderer-supplied level could be silently downgraded by a bug
@@ -261,10 +272,21 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings, voi
       throw new Error('Groq API key is required');
     }
 
-    // Send progress updates
+    // Send progress updates. The renderer's channel is unconditional so the
+    // desktop UI behaves identically whether or not a phone is watching; the
+    // remote listener is an extra subscriber, never a replacement.
     const sendProgress = (stage, message) => {
       if (mainWindow && mainWindow.webContents) {
         mainWindow.webContents.send('query-progress', { stage, message });
+      }
+      if (onProgress) {
+        try {
+          onProgress(stage, message);
+        } catch (progressError) {
+          // A dead remote socket must never take down a query the user is
+          // still waiting on at the desktop.
+          console.error('remote progress listener threw:', progressError.message);
+        }
       }
     };
 
@@ -546,17 +568,28 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings, voi
 
   } catch (error) {
     if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send('query-progress', { 
-        stage: 'error', 
-        message: `Query failed: ${error.message}` 
+      mainWindow.webContents.send('query-progress', {
+        stage: 'error',
+        message: `Query failed: ${error.message}`
       });
+    }
+    if (onProgress) {
+      try {
+        onProgress('error', `Query failed: ${error.message}`);
+      } catch (progressError) {
+        console.error('remote progress listener threw:', progressError.message);
+      }
     }
     return {
       success: false,
       error: error.message
     };
   }
-});
+}
+
+// The renderer's entry point into the pipeline above - unchanged in shape and
+// payload from before the extraction.
+ipcMain.handle('process-query', async (event, payload) => processQuery(payload || {}));
 
 // Separate TTS generation handler
 ipcMain.handle('generate-tts', async (event, { text, settings, voiceAllowed }) => {
@@ -596,4 +629,4 @@ ipcMain.handle('generate-tts', async (event, { text, settings, voiceAllowed }) =
   }
 });
 
-module.exports = { queryDuckDB, callGroqAPI, callDeepgramTTS, setMainWindow };
+module.exports = { queryDuckDB, callGroqAPI, callDeepgramTTS, setMainWindow, processQuery };

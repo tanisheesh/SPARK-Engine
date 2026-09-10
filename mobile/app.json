@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "SPARK",
+    "slug": "spark-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "sparkmobile",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#141515",
+    "splash": {
+      "image": "./assets/logo-mark.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#141515"
+    },
+    "assetBundlePatterns": ["assets/*"],
+    "android": {
+      "package": "com.sparkengine.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#141515"
+      },
+      "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "pan",
+      "permissions": ["INTERNET"]
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.sparkengine.mobile"
+    },
+    "plugins": ["expo-font", "expo-secure-store", "expo-web-browser"],
+    "extra": {
+      "note": "Runtime config comes from EXPO_PUBLIC_* env vars in .env - see src/config.ts"
+    }
+  }
+}

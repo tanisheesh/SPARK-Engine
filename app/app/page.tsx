@@ -114,6 +114,16 @@ function saveConversations(convos: Conversation[]) {
   }
 }
 
+/* A cheap fingerprint of the conversation set, used to decide whether a merged
+   list from the main process is actually new. Covers the fields a merge can
+   change — membership, turn count, per-turn status and last-write time — which
+   is enough to avoid an update loop without deep-comparing every row. */
+function conversationSignature(convos: Conversation[]): string {
+  return convos
+    .map((c) => `${c.id}:${c.updatedAt}:${c.turns.map((t) => `${t.id}${t.status}`).join(',')}`)
+    .join('|');
+}
+
 const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -331,10 +341,86 @@ export default function Home() {
     });
   }, [plan, activeId]);
 
-  /* Persist whenever the thread changes. */
+  /* Persist whenever the thread changes.
+
+     Also mirrors into the main process, which is what lets a question asked
+     from SPARK Mobile land in this same conversation. Main merges rather than
+     replaces and hands back the union, so a mobile turn written while this
+     renderer was mid-edit is not lost. We adopt that union only when it
+     actually differs — comparing signatures rather than object identity, since
+     the merged array is always a fresh reference and would otherwise
+     re-trigger this effect forever. */
   useEffect(() => {
     if (conversations.length) saveConversations(conversations);
+    const api = window.electronAPI;
+    if (!api?.syncConversations) return;
+
+    let cancelled = false;
+    api
+      .syncConversations(conversations)
+      .then((res) => {
+        if (cancelled || !res?.success) return;
+        const merged = res.conversations as Conversation[];
+        if (conversationSignature(merged) !== conversationSignature(conversations)) {
+          setConversations(merged);
+        }
+      })
+      .catch(() => {
+        /* The mirror is best-effort; the desktop keeps working without it. */
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [conversations]);
+
+  /* A turn arriving from the phone while this window is open. Main pushes the
+     merged set; the same signature guard keeps this from looping. */
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.onConversationsUpdated) return;
+
+    api.onConversationsUpdated((_e: unknown, payload: { conversations: unknown[] }) => {
+      const incoming = payload?.conversations as Conversation[] | undefined;
+      if (!Array.isArray(incoming)) return;
+      setConversations((prev) =>
+        conversationSignature(incoming) === conversationSignature(prev) ? prev : incoming
+      );
+    });
+
+    return () => api.removeAllListeners?.('conversations-updated');
+  }, []);
+
+  /* Tell main which dataset a remote question should run against. Without this
+     the bridge refuses remote queries outright rather than guessing at whatever
+     happens to be left in DuckDB. */
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.remoteSetSource) return;
+
+    if (!currentDataset || !datasetType) {
+      void api.remoteSetSource(null);
+      return;
+    }
+
+    if (isFileSource(datasetType)) {
+      // File sources need the real path, which only the main process's own
+      // file list can supply.
+      api
+        .listCSVFiles()
+        .then((files: CsvFileRow[]) => {
+          const file = files.find((f) => f.name === currentDataset);
+          void api.remoteSetSource({
+            type: datasetType,
+            name: currentDataset,
+            path: file?.path,
+          });
+        })
+        .catch(() => void api.remoteSetSource({ type: datasetType, name: currentDataset }));
+    } else {
+      void api.remoteSetSource({ type: datasetType, name: currentDataset });
+    }
+  }, [currentDataset, datasetType]);
 
   /* Keep the newest turn in view. */
   useEffect(() => {

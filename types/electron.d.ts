@@ -1,6 +1,26 @@
 // Electron API types
 import type { DataSourceType, DatabaseSourceType } from '../lib/data-sources';
 
+/** Connection state of the outbound relay link used by SPARK Mobile. */
+export interface RemoteStatus {
+  state: 'idle' | 'connecting' | 'online' | 'retrying' | 'error';
+  relayUrl: string | null;
+  deviceName: string | null;
+  /** 'pairing' is the dev-only code mode; 'account' is a real Cognito token. */
+  mode: 'pairing' | 'account';
+  pairingCode: string | null;
+  lastError: string | null;
+  busy: boolean;
+}
+
+/** The dataset a remote question runs against. `path` is set for file sources
+    only; database sources are already resident in DuckDB. */
+export interface RemoteSource {
+  type: DataSourceType;
+  name: string;
+  path?: string;
+}
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -26,6 +46,25 @@ declare global {
       onSystemNotification: (callback: (event: any, notification: any) => void) => void;
       removeAllListeners: (channel: string) => void;
       onOAuthCallback: (callback: (event: any, url: string) => void) => void;
+
+      /* ---------- Remote sessions (SPARK Mobile) ---------- */
+      remoteStatus: () => Promise<RemoteStatus>;
+      remoteConnect: (data: { relayUrl: string; token: string; deviceName?: string }) =>
+        Promise<{ success: boolean; status?: RemoteStatus; error?: string }>;
+      remoteDisconnect: () => Promise<{ success: boolean; status: RemoteStatus }>;
+      /** Tells main which dataset a remote question should run against. */
+      remoteSetSource: (source: RemoteSource | null) => Promise<{ success: boolean }>;
+      /** Pushes the renderer's conversations into main's mirror and receives
+          the merged list back — this is how mobile turns reach the desktop UI. */
+      syncConversations: (conversations: unknown[]) =>
+        Promise<{ success: boolean; conversations: unknown[]; error?: string }>;
+      onRemoteStatus: (callback: (event: unknown, status: RemoteStatus) => void) => void;
+      onConversationsUpdated: (
+        callback: (
+          event: unknown,
+          payload: { reason: string; conversationId: string; conversations: unknown[] }
+        ) => void
+      ) => void;
     };
     // Loaded from https://checkout.razorpay.com/v1/checkout.js by PricingScreen.
     Razorpay?: new (options: {
