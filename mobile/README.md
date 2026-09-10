@@ -78,6 +78,28 @@ npm start        # then press 'a', or scan the QR with Expo Go
 
 Enter the pairing code. You should see your desktop's conversations.
 
+### "This app is not valid for SDK NN"
+
+Expo Go from the Play Store only ever supports the **latest** Expo SDK, so a
+project pinned to an older one can never open in it. When Expo Go moves on,
+move with it:
+
+```bash
+npx expo install expo@^NN.0.0 --fix   # NN = the SDK Expo Go asks for
+npx expo install --fix
+npx expo-doctor
+npm run typecheck
+```
+
+Two things have moved between SDKs so far and will need fixing by hand if they
+resurface: `android.edgeToEdgeEnabled` was removed once edge-to-edge became
+mandatory, and `splash` moved out of `app.json` into the `expo-splash-screen`
+plugin. `expo-doctor` names both precisely.
+
+The alternative — staying on an old SDK and sideloading a matching Expo Go APK —
+is not worth it. A development build (`npx expo run:android`) is the real answer
+if you ever need to pin.
+
 ### Account sign-in
 
 Pairing codes are for local development — the code *is* the identity, and the

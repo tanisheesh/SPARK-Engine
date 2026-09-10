@@ -87,7 +87,10 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={color.bg} />
+      {/* SDK 57 dropped `backgroundColor` — edge-to-edge is mandatory now, so
+          the bar sits over the app's own background rather than painting its
+          own. Each screen's SafeAreaView already fills that area with color.bg. */}
+      <StatusBar style="light" />
       <SessionProvider>
         <Routes />
       </SessionProvider>
