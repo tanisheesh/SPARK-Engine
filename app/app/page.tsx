@@ -308,6 +308,29 @@ export default function Home() {
     });
   }, [loadBillingStatus]);
 
+  // TIERS.txt's per-tier "query history" line (FREE none, IGNITE 7 days,
+  // BLAZE 14, STORM 28, THUNDER unlimited) — purged locally since
+  // conversations only ever live in this device's localStorage, never on a
+  // server. Runs whenever the plan is (re)confirmed, e.g. right after
+  // login or a tier change. The conversation currently open is exempt so
+  // switching tiers never yanks away what you're actively looking at.
+  //
+  // plan starts null on every launch until loadBillingStatus() resolves,
+  // and quotaFor(null) falls back to FREE (0-day retention) — without this
+  // guard that fallback would run for real here, wiping every paying
+  // user's history for the split second before their real tier loads.
+  // Same "fail open, don't punish a network hiccup" rule as consumeQuery.
+  useEffect(() => {
+    if (plan === null) return;
+    const days = quota.chatHistoryDays;
+    if (days === null) return;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    setConversations((prev) => {
+      const kept = prev.filter((c) => c.id === activeId || c.pinned || c.updatedAt >= cutoff);
+      return kept.length === prev.length ? prev : kept;
+    });
+  }, [plan, activeId]);
+
   /* Persist whenever the thread changes. */
   useEffect(() => {
     if (conversations.length) saveConversations(conversations);
@@ -647,6 +670,7 @@ export default function Home() {
           csvFile: path,
           settings: apiSettings,
           voiceAllowed: canSpeak,
+          wideTableColumnCap: quota.wideTableColumnCap,
         });
 
         if (cancelledRef.current.has(turnId)) {
@@ -709,6 +733,7 @@ export default function Home() {
       ensureConversation,
       patchTurn,
       playAudio,
+      quota,
       toast,
     ]
   );

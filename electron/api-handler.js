@@ -247,7 +247,7 @@ function composeLocalAnswer(question, rows) {
 }
 
 // Main query handler with progress updates
-ipcMain.handle('process-query', async (event, { question, csvFile, settings, voiceAllowed }) => {
+ipcMain.handle('process-query', async (event, { question, csvFile, settings, voiceAllowed, wideTableColumnCap }) => {
   try {
     // The privacy level is read from disk here, NOT taken from the renderer
     // argument. A renderer-supplied level could be silently downgraded by a bug
@@ -319,21 +319,25 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings, voi
       runQuery,
       firstTable,
       (tableColumns.find(t => t.tableName === firstTable) || { schema: [] }).schema,
-      { level: privacyLevel }
+      // wideTableColumnCap comes from the renderer's tier-derived quota
+      // (lib/spark/quotas.ts) — undefined/omitted falls back to
+      // profileTable's own default so an older renderer build still works.
+      { level: privacyLevel, columnCap: wideTableColumnCap }
     );
     const sampleBlock = profiler.buildSampleBlock(tableProfile, privacyCfg.syntheticRows);
 
-    sendProgress('sql', 'Generating SQL query...');
+    // Generate SQL using Groq with all table schemas. generateText() falls
+    // back to the local model here too — when Local-only privacy mode
+    // disables cloud SQL gen, or Groq errors out and a local model is
+    // installed — same as the format step below; there is no SQL-specific
+    // exception. A local-generated query is exactly the case most likely to
+    // need a retry, since a small model is more likely to reference a
+    // column that doesn't exist or write invalid syntax.
+    const sqlSystemPrompt = `You are a SQL expert. Generate a DuckDB SQL query based on the user's question.
 
-    // Generate SQL using Groq with all table schemas
-    const sqlPrompt = [
-      {
-        role: 'system',
-        content: `You are a SQL expert. Generate a DuckDB SQL query based on the user's question.
-        
         Available Tables and Schemas:
         ${allSchemas.join('\n\n')}
-        
+
         ${sampleBlock}
 
         SQL RULES:
@@ -347,50 +351,76 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings, voi
         - For pattern matching on numbers, always cast to VARCHAR first: WHERE CAST(user_id AS VARCHAR) LIKE '11%'
         - For exact numeric matches, use = operator: WHERE user_id = 123
         - For numeric ranges, use comparison operators: WHERE user_id BETWEEN 100 AND 200
-        
-        Return ONLY the SQL query, nothing else.`
-      },
-      {
-        role: 'user',
-        content: question
-      }
+
+        Return ONLY the SQL query, nothing else.`;
+
+    // Failed queries are retried with the error fed back as context — up to
+    // 3 attempts total — instead of failing on the first bad query a model
+    // writes. A syntax error or a reference to a column that doesn't exist
+    // is exactly the kind of mistake a model can correct once it's told
+    // what DuckDB actually said.
+    const MAX_SQL_ATTEMPTS = 3;
+    let sqlQuery, normalizedSql, queryResults;
+    let sqlMessages = [
+      { role: 'system', content: sqlSystemPrompt },
+      { role: 'user', content: question },
     ];
 
-    // SQL generation always goes through Groq - the 1.5B local model isn't
-    // reliable enough at writing correct SQL against an arbitrary schema, so
-    // there's no local fallback here (only for the NLP response-formatting step below).
-    const sqlGen = await generateText(sqlPrompt, settings.groqApiKey, {
-      level: privacyLevel,
-      callKind: 'sql-gen',
-      retainPayload: privacyCfg.auditRetainPayload,
-    });
-    let sqlQuery = sqlGen.text;
-    sqlQuery = sqlQuery.replace(/```sql\n?/g, '').replace(/```\n?/g, '').trim();
-    
-    // Auto-fix common type casting issues
-    sqlQuery = sqlQuery.replace(/(\w+)\s+LIKE\s+('[^']*')/gi, (match, column, pattern) => {
-      if (column.toLowerCase().includes('id') || column.toLowerCase().includes('user_id') || column.toLowerCase().includes('number')) {
-        return `CAST(${column} AS VARCHAR) LIKE ${pattern}`;
+    for (let attempt = 1; attempt <= MAX_SQL_ATTEMPTS; attempt++) {
+      sendProgress('sql', attempt === 1
+        ? 'Generating SQL query...'
+        : `Query failed — retrying with the error (attempt ${attempt} of ${MAX_SQL_ATTEMPTS})...`);
+
+      const sqlGen = await generateText(sqlMessages, settings.groqApiKey, {
+        level: privacyLevel,
+        callKind: 'sql-gen',
+        retainPayload: privacyCfg.auditRetainPayload,
+      });
+      let candidate = sqlGen.text.replace(/```sql\n?/g, '').replace(/```\n?/g, '').trim();
+
+      // Auto-fix common type casting issues
+      candidate = candidate.replace(/(\w+)\s+LIKE\s+('[^']*')/gi, (match, column, pattern) => {
+        if (column.toLowerCase().includes('id') || column.toLowerCase().includes('user_id') || column.toLowerCase().includes('number')) {
+          return `CAST(${column} AS VARCHAR) LIKE ${pattern}`;
+        }
+        return match;
+      });
+
+      try {
+        // Execute SQL query directly on DuckDB.
+        //
+        // The old check was `/^(SELECT|WITH)/i` on the raw string, which inspected
+        // the leading keyword and nothing else. That let a model completion like
+        //   SELECT * FROM read_csv_auto('C:/Users/<user>/Documents/payroll.csv')
+        // execute, and its rows then flowed into the formatting prompt and out to
+        // Groq. The guard strips comments, rejects stacked statements, denies
+        // file/network table functions, enforces the row cap, and — the actual
+        // control — requires every relation to be one of the tables we imported.
+        const normalized = sqlGuard.assertSafeSelect(candidate, {
+          allowedTables: tables.map(t => t.table_name),
+        });
+
+        sendProgress('execute', 'Executing database query...');
+        const rows = await duckdbClient.all(safeDbFile, normalized);
+
+        sqlQuery = candidate;
+        normalizedSql = normalized;
+        queryResults = rows;
+        break;
+      } catch (err) {
+        if (attempt === MAX_SQL_ATTEMPTS) throw err;
+        console.warn(`⚠️ SQL attempt ${attempt} failed, retrying with error context:`, err.message);
+        sqlMessages = [
+          ...sqlMessages,
+          { role: 'assistant', content: candidate },
+          {
+            role: 'user',
+            content: `That query failed with this error: ${err.message}\n\n` +
+              `Write a corrected DuckDB SQL query that fixes this. Return ONLY the SQL query, nothing else.`,
+          },
+        ];
       }
-      return match;
-    });
-
-    sendProgress('execute', 'Executing database query...');
-
-    // Execute SQL query directly on DuckDB.
-    //
-    // The old check was `/^(SELECT|WITH)/i` on the raw string, which inspected
-    // the leading keyword and nothing else. That let a model completion like
-    //   SELECT * FROM read_csv_auto('C:/Users/<user>/Documents/payroll.csv')
-    // execute, and its rows then flowed into the formatting prompt and out to
-    // Groq. The guard strips comments, rejects stacked statements, denies
-    // file/network table functions, enforces the row cap, and — the actual
-    // control — requires every relation to be one of the tables we imported.
-    const normalizedSql = sqlGuard.assertSafeSelect(sqlQuery, {
-      allowedTables: tables.map(t => t.table_name),
-    });
-
-    const queryResults = await duckdbClient.all(safeDbFile, normalizedSql);
+    }
 
     sendProgress('format', 'Formatting response...');
 

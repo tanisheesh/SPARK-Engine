@@ -12,6 +12,22 @@ const ENUM_MAX_CARDINALITY = 12;
 const ENUM_K_ANONYMITY = 5;
 const ENUM_SAFE_VALUE = /^[A-Za-z0-9_ .-]{1,32}$/;
 
+// A 50-100 column table would otherwise get a fabricated sample row PLUS an
+// enum-cardinality check per column, every one of which either widens the
+// prompt sent to Groq or costs a DuckDB round-trip. The full schema (every
+// column's name and type) still goes to the SQL-gen prompt regardless —
+// this cap only thins the auxiliary sample-row profiling, so a query
+// against an uncapped column still works; it just loses the fabricated
+// format hint for it.
+//
+// The real cap is tier-derived (lib/spark/quotas.ts's wideTableColumnCap,
+// passed in via options.columnCap from the renderer) — this is only the
+// fallback for a caller that doesn't supply one. It must stay a pure
+// function of (table, level, cap), never of any one question, or the cache
+// would serve one question's narrowing to another — hence it's part of the
+// cache key below rather than baked into which rows get fetched.
+const DEFAULT_WIDE_TABLE_COLUMN_CAP = 40;
+
 // Column names come from information_schema, but a CSV header cell can put a
 // double quote into one (`a""b` in the header becomes the column `a"b`), which
 // would break straight out of a naively quoted identifier. SQL escapes a quote
@@ -119,16 +135,25 @@ function clearProfileCache() {
 // privacy boundary is the network socket, not the process.
 async function profileTable(query, tableName, columns, options) {
   const level = (options && options.level) || 'standard';
+  // null explicitly means "no cap" (THUNDER); undefined/omitted means the
+  // caller didn't say, so fall back rather than treat it as unlimited.
+  const columnCap = options && 'columnCap' in options && options.columnCap !== undefined
+    ? options.columnCap
+    : DEFAULT_WIDE_TABLE_COLUMN_CAP;
 
   const countRow = await query('SELECT COUNT(*) AS n FROM ' + quoteIdent(tableName)).catch(() => null);
   const rowCount = countRow && countRow[0] ? Number(countRow[0].n) : -1;
-  const cacheKey = tableName + '|' + level + '|' + rowCount + '|' + columns.length;
+  const cacheKey = tableName + '|' + level + '|' + rowCount + '|' + columns.length + '|' + columnCap;
   if (rowCount >= 0 && profileCache.has(cacheKey)) return profileCache.get(cacheKey);
 
   const sample = await query('SELECT * FROM ' + quoteIdent(tableName) + ' LIMIT ' + SAMPLE_SIZE).catch(() => []);
 
+  const profiledColumns = (columnCap !== null && columns.length > columnCap)
+    ? columns.slice(0, columnCap)
+    : columns;
+
   const profiles = [];
-  for (const col of columns) {
+  for (const col of profiledColumns) {
     const name = col.column_name;
     const values = sample.map(r => r[name]).filter(v => v !== null && v !== undefined);
 

@@ -38,6 +38,7 @@ function hintFor(column, value, shape) {
   if (shape === 'email') return 'an email address';
   if (shape === 'phone') return 'a phone number';
   if (shape === 'bool') return 'yes/no value';
+  if (shape === 'hash') return 'an encrypted or hashed value';
   const name = String(column || '').toLowerCase();
   if (/name|first|last|surname|patient/.test(name)) return 'person or entity name';
   if (/city|addr|street|zip|postal/.test(name)) return 'a location';

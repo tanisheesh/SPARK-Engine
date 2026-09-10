@@ -36,6 +36,23 @@ const SHAPES = [
   ['code', /^[A-Za-z0-9_.-]{1,32}$/],
 ];
 
+// Common hex-digest lengths: MD5 (32), SHA-1 (40), SHA-224 (56), SHA-256 (64),
+// SHA-384 (96), SHA-512 (128). A source column that's already encrypted or
+// hashed before it ever reached this app has no recognizable name or shape
+// of its own — the "value SHAPE" signal above only works for plaintext PII,
+// so a hash sitting in a column named `field_7` would otherwise match
+// nothing and fall through as a harmless-looking short 'code'.
+const HASH_HEX_LENGTHS = new Set([32, 40, 56, 64, 96, 128]);
+
+function looksLikeHashOrCiphertext(s) {
+  if (HASH_HEX_LENGTHS.has(s.length) && /^[0-9a-f]+$/i.test(s)) return true;
+  // Base64 ciphertext/digest: mixed case + digits (a real short business
+  // code is rarely both case-mixed AND this long), optional '=' padding.
+  if (s.length >= 20 && /^[A-Za-z0-9+/_-]+={0,2}$/.test(s) &&
+      /[A-Z]/.test(s) && /[a-z]/.test(s) && /[0-9]/.test(s)) return true;
+  return false;
+}
+
 // Returns a shape label, or 'freetext' when nothing matches (long prose, which
 // is the most dangerous kind of value: it can contain anything).
 function detectValueShape(value) {
@@ -50,6 +67,7 @@ function detectValueShape(value) {
   // the right bias for a column whose name gives nothing away (`col_7`).
   if (/^\d{13,19}$/.test(s)) return 'card';
   if (/^-?\d+(?:\.\d+)?$/.test(s)) return 'number';
+  if (looksLikeHashOrCiphertext(s)) return 'hash';
   for (const [label, re] of SHAPES) {
     if (re.test(s)) return label;
   }
@@ -57,7 +75,7 @@ function detectValueShape(value) {
 }
 
 // Shapes that must never be shown verbatim, whatever the column is called.
-const SENSITIVE_SHAPES = new Set(['email', 'ssn', 'card', 'phone', 'ipv4', 'uuid', 'url', 'freetext']);
+const SENSITIVE_SHAPES = new Set(['email', 'ssn', 'card', 'phone', 'ipv4', 'uuid', 'url', 'freetext', 'hash']);
 
 function isSensitiveShape(shape) {
   return SENSITIVE_SHAPES.has(shape);

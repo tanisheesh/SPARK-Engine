@@ -24,6 +24,17 @@ export interface Quota {
       gets SPARK-managed Groq + Deepgram keys since those seats pay enough
       to cover it. */
   managedKeys: boolean;
+  /** TIERS.txt's "query history" line — how many days a conversation stays
+      before it's purged from local storage. 0 means FREE's "no history":
+      only the conversation you're actively looking at survives. null means
+      unlimited (THUNDER). Enforced in app/app/page.tsx on every plan load. */
+  chatHistoryDays: number | null;
+  /** How many columns of a wide table get a fabricated sample-row profile
+      for the SQL-gen prompt. Every column's name and type still goes to
+      Groq regardless of tier — this only limits the auxiliary format-hint
+      richness for very wide tables, not which columns can be queried. null
+      means unlimited (THUNDER: every column profiled, however wide). */
+  wideTableColumnCap: number | null;
 }
 
 const QUOTAS: Record<Tier, Quota> = {
@@ -34,6 +45,8 @@ const QUOTAS: Record<Tier, Quota> = {
     voice: false,
     offlineSupport: false,
     managedKeys: false,
+    chatHistoryDays: 0,
+    wideTableColumnCap: 20,
   },
   IGNITE: {
     csvSizeGb: 100,
@@ -42,6 +55,8 @@ const QUOTAS: Record<Tier, Quota> = {
     voice: true,
     offlineSupport: false,
     managedKeys: false,
+    chatHistoryDays: 7,
+    wideTableColumnCap: 40,
   },
   BLAZE: {
     csvSizeGb: 200,
@@ -50,6 +65,8 @@ const QUOTAS: Record<Tier, Quota> = {
     voice: true,
     offlineSupport: true,
     managedKeys: false,
+    chatHistoryDays: 14,
+    wideTableColumnCap: 60,
   },
   STORM: {
     csvSizeGb: 400,
@@ -58,6 +75,8 @@ const QUOTAS: Record<Tier, Quota> = {
     voice: true,
     offlineSupport: true,
     managedKeys: false,
+    chatHistoryDays: 28,
+    wideTableColumnCap: 100,
   },
   THUNDER: {
     csvSizeGb: null,
@@ -66,6 +85,8 @@ const QUOTAS: Record<Tier, Quota> = {
     voice: true,
     offlineSupport: true,
     managedKeys: true,
+    chatHistoryDays: null,
+    wideTableColumnCap: null,
   },
 };
 
