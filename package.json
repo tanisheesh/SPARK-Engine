@@ -1,6 +1,6 @@
 {
   "name": "spark-engine",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "SPARK Engine - Voice Data Analytics Platform",
   "author": "Team Binary Beast",
   "main": "electron/main.js",
