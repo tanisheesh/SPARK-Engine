@@ -315,6 +315,40 @@ const heartbeat = setInterval(() => {
   }
 }, proto.HEARTBEAT_MS);
 
+/* A failed listen arrives as an 'error' event, and without a handler Node
+   rethrows it as an unhandled 'error' with a stack trace that says nothing
+   useful. The overwhelmingly common case is a relay already running in another
+   terminal, so say exactly that and how to check.
+
+   This must be attached to BOTH servers. `ws` registers its own forwarder on
+   the http server when it is constructed with `{ server }`, and that forwarder
+   re-emits on the WebSocketServer - which, having no listener of its own,
+   throws before any handler added to the http server afterwards can run. */
+let reported = false;
+function handleListenError(error) {
+  if (reported) return;
+  reported = true;
+
+  if (error.code === 'EADDRINUSE') {
+    console.error(
+      `\nPort ${PORT} is already in use — most likely a SPARK relay you started earlier.\n` +
+      `\nCheck what is on it:\n` +
+      `  Windows:  Get-NetTCPConnection -LocalPort ${PORT} -State Listen\n` +
+      `  macOS/Linux:  lsof -i :${PORT}\n` +
+      `\nIf it is already a relay, use it — visit http://127.0.0.1:${PORT}/health to confirm.\n` +
+      `To run a second one instead:  PORT=${PORT + 1} npm start\n`
+    );
+  } else if (error.code === 'EACCES') {
+    console.error(`\nNot allowed to bind ${HOST}:${PORT}. Ports below 1024 need elevation — pick a higher one:  PORT=8787 npm start\n`);
+  } else {
+    console.error(`\nCould not start the relay on ${HOST}:${PORT}: ${error.message}\n`);
+  }
+  process.exit(1);
+}
+
+wss.on('error', handleListenError);
+httpServer.on('error', handleListenError);
+
 httpServer.listen(PORT, HOST, () => {
   log(`SPARK relay listening on ${HOST}:${PORT} (protocol v${proto.PROTOCOL_VERSION}, mode: ${MODE})`);
   if (MODE === 'dev') {

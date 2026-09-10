@@ -207,6 +207,25 @@ async function main() {
     second.close();
     client.close();
 
+    /* ---- port already in use reports clearly ----
+       `ws` forwards the http server's error onto the WebSocketServer, so a
+       handler on the http server alone is never reached and the process dies
+       with a bare stack trace. Easy to reintroduce, hence this test. */
+    const busy = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+      env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let busyOutput = '';
+    busy.stdout.on('data', (d) => (busyOutput += d));
+    busy.stderr.on('data', (d) => (busyOutput += d));
+    const busyCode = await new Promise((resolve) => busy.on('exit', resolve));
+    check(
+      'a port clash explains itself instead of throwing a stack trace',
+      /already in use/.test(busyOutput) && !/Unhandled 'error' event/.test(busyOutput),
+      busyOutput.slice(0, 200)
+    );
+    check('and exits non-zero', busyCode === 1, busyCode);
+
     /* ---- cognito mode refuses pairing codes ---- */
     relay.kill();
     await sleep(300);
