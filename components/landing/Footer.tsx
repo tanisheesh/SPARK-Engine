@@ -113,7 +113,7 @@ export default function Footer() {
               &copy; {new Date().getFullYear()} SPARK Engine. All rights reserved.
             </p>
             <p className="text-xs font-mono" style={{ color: '#6A6A6A' }}>
-              Made by Team Binary Beast
+              Made by Team Stack Don't Overflow
             </p>
           </div>
           <div className="flex flex-wrap justify-center sm:justify-start gap-x-5 gap-y-1.5">

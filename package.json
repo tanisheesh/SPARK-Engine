@@ -2,7 +2,7 @@
   "name": "spark-engine",
   "version": "1.1.0",
   "description": "SPARK Engine - Voice Data Analytics Platform",
-  "author": "Team Binary Beast",
+  "author": "Team Stack Don't Overflow",
   "main": "electron/main.js",
   "homepage": "./",
   "private": true,
@@ -61,7 +61,7 @@
   "build": {
     "appId": "com.sparkengine.analytics",
     "productName": "SPARK Engine",
-    "copyright": "Copyright © 2026 Team Binary Beast",
+    "copyright": "Copyright © 2026 Team Stack Don't Overflow",
     "directories": {
       "output": "release"
     },

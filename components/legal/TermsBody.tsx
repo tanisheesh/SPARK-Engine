@@ -37,7 +37,7 @@ export function TermsBody({ onCrossLink }: { onCrossLink?: (doc: LegalDoc) => vo
       <p>
         These Terms of Service (&ldquo;Terms&rdquo;) govern your use of the SPARK Engine desktop
         application, its accompanying website, and any related services (together,
-        &ldquo;SPARK Engine&rdquo; or the &ldquo;Service&rdquo;), operated by Team Binary Beast
+        &ldquo;SPARK Engine&rdquo; or the &ldquo;Service&rdquo;), operated by Team Stack Don't Overflow
         (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;). By downloading, installing, or
         using SPARK Engine, you agree to these Terms. If you do not agree, do not use the Service.
       </p>
@@ -139,7 +139,7 @@ export function TermsBody({ onCrossLink }: { onCrossLink?: (doc: LegalDoc) => vo
 
       <h2>8. Intellectual property</h2>
       <p>
-        SPARK Engine, its name, logo, and underlying software are owned by Team Binary Beast and
+        SPARK Engine, its name, logo, and underlying software are owned by Team Stack Don't Overflow and
         protected by applicable intellectual property laws. These Terms do not grant you any right
         to use our trademarks or branding except as necessary to describe your use of the Service.
       </p>
@@ -154,7 +154,7 @@ export function TermsBody({ onCrossLink }: { onCrossLink?: (doc: LegalDoc) => vo
 
       <h2>10. Limitation of liability</h2>
       <p>
-        To the maximum extent permitted by law, Team Binary Beast will not be liable for any
+        To the maximum extent permitted by law, Team Stack Don't Overflow will not be liable for any
         indirect, incidental, special, consequential, or punitive damages, or any loss of data,
         profits, or revenue, arising out of or related to your use of the Service. Our total
         liability for any claim arising from these Terms or the Service will not exceed the amount

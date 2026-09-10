@@ -77,7 +77,7 @@ export default function LegalLayout({
 
       <footer className="px-6 py-8" style={{ borderTop: '1px solid #2A2A2A' }}>
         <p className="max-w-2xl mx-auto text-xs font-mono" style={{ color: '#6A6A6A' }}>
-          &copy; {new Date().getFullYear()} SPARK Engine. Made by Team Binary Beast.
+          &copy; {new Date().getFullYear()} SPARK Engine. Made by Team Stack Don't Overflow.
         </p>
       </footer>
 
