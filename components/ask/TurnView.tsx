@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import type { Turn } from '../../lib/spark/types';
 import { inferChart } from '../../lib/spark/chart';
-import { followUps } from '../../lib/spark/studio';
+import { followUps, rootQuestion } from '../../lib/spark/studio';
 import { humanizeError } from '../../lib/spark/errors';
 import { duration, relativeTime } from '../../lib/spark/format';
 import { ChartCard, Disclosure, QueryTrace, SQLViewer, tablesUsed } from './Evidence';
@@ -60,7 +60,7 @@ export function TurnView({
       {/* The question. Understated, right-aligned, on its own line. */}
       <div className="mb-5 flex justify-end">
         <div className="max-w-[80%] rounded-lg border border-line-subtle bg-surface2 px-2.5 py-1.5">
-          <p className="m-0 text-base leading-snug text-muted">{turn.question}</p>
+          <p className="m-0 text-base leading-snug text-muted">{rootQuestion(turn.question)}</p>
         </div>
       </div>
 
@@ -80,7 +80,7 @@ export function TurnView({
           <ErrorState
             turn={turn}
             onRetry={() => onRetry(turn)}
-            onEdit={() => onEditQuestion(turn.question)}
+            onEdit={() => onEditQuestion(rootQuestion(turn.question))}
             onOpenSettings={onOpenSettings}
             onConnect={onConnect}
           />
@@ -96,7 +96,7 @@ export function TurnView({
               <div className="mt-4">
                 <ChartCard
                   spec={chart}
-                  title={turn.question}
+                  title={rootQuestion(turn.question)}
                   source={turn.sql ? tablesUsed(turn.sql).join(' · ') : undefined}
                 />
               </div>

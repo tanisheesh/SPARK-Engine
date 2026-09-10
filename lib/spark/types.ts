@@ -61,6 +61,14 @@ export interface Turn {
   question: string;
   /** Set when the turn was started by a Studio action rather than typed. */
   originAction?: string;
+  /**
+   * The full text actually sent to processQuery, when it differs from the
+   * clean `question` shown in the UI — e.g. a Studio action restates the
+   * prior turn's question plus its own instructions for the stateless SQL
+   * generator. Retry needs this, not just the display text. Absent for a
+   * plain typed question, where `question` already is the full prompt.
+   */
+  prompt?: string;
   status: TurnStatus;
   createdAt: number;
   completedAt?: number;

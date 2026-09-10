@@ -48,9 +48,18 @@ export const STUDIO_GROUPS: { id: StudioGroup; label: string }[] = [
   { id: 'discover', label: 'Discover' },
 ];
 
+// A turn's `question` is always the clean, human-typed/displayed text now
+// (see displayQuestion in app/app/page.tsx's runQuestion) — but a turn
+// persisted before that fix may still have this wrapper baked into
+// `question` from an older bug. Stripping it here is a one-level backstop
+// so basis() never restates an already-wrapped prompt; it does not need
+// to handle further nesting since new turns can no longer produce it.
+const WRAPPER_RE = /^Original question: "([\s\S]*?)"\.\s*/;
+export const rootQuestion = (q: string): string => WRAPPER_RE.exec(q)?.[1] ?? q;
+
 /** Restates the question so a stateless SQL generator has full context. */
 const basis = (t: Turn | null) =>
-  t?.question ? `Original question: "${t.question}".` : '';
+  t?.question ? `Original question: "${rootQuestion(t.question)}".` : '';
 
 export const STUDIO_ACTIONS: StudioAction[] = [
   /* ---------- Analyze ---------- */

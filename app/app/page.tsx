@@ -45,7 +45,7 @@ import type {
   VoiceState,
 } from '../../lib/spark/types';
 import { TRACE_LABELS } from '../../lib/spark/types';
-import { ACTION_BY_ID, type StudioAction } from '../../lib/spark/studio';
+import { ACTION_BY_ID, rootQuestion, type StudioAction } from '../../lib/spark/studio';
 
 const STORE_KEY = 'spark.conversations.v1';
 
@@ -568,9 +568,14 @@ export default function Home() {
   );
 
   const runQuestion = useCallback(
-    async (q: string, originAction?: string) => {
+    async (q: string, originAction?: string, displayQuestion?: string) => {
       const text = q.trim();
       if (!text || busy) return;
+      // Studio actions send a whole restated prompt to the backend (the
+      // stateless SQL generator needs it), but that prompt is not fit to
+      // show as "the question" in a turn or the conversations list —
+      // displayQuestion carries the clean, human version instead.
+      const shownQuestion = (displayQuestion ?? text).trim() || text;
 
       if (!apiSettings.groqApiKey) {
         toast('Add your Groq API key to start asking.', 'error');
@@ -604,11 +609,12 @@ export default function Home() {
       }
 
       setNav('ask');
-      const convId = ensureConversation(text);
+      const convId = ensureConversation(shownQuestion);
       const turnId = uid();
       const turn: Turn = {
         id: turnId,
-        question: text,
+        question: shownQuestion,
+        prompt: text !== shownQuestion ? text : undefined,
         originAction,
         status: 'thinking',
         createdAt: Date.now(),
@@ -762,7 +768,8 @@ export default function Home() {
             datasetName: currentDataset,
             sourceType: datasetType,
           }),
-          action.label
+          action.label,
+          lastDoneTurn ? rootQuestion(lastDoneTurn.question) : undefined
         );
       }
     },
@@ -1026,7 +1033,7 @@ export default function Home() {
                       turn={t}
                       isLast={i === turns.length - 1}
                       onFollowUp={(q) => runQuestion(q)}
-                      onRetry={(t) => runQuestion(t.question, t.originAction)}
+                      onRetry={(t) => runQuestion(t.prompt ?? t.question, t.originAction, t.question)}
                       onEditQuestion={(q) => {
                         setQuestion(q);
                         composerRef.current?.focus();

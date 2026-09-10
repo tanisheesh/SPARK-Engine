@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import type { Conversation } from '../../lib/spark/types';
 import { relativeTime } from '../../lib/spark/format';
+import { rootQuestion } from '../../lib/spark/studio';
 import { Button, EmptyState, IconButton, Input, cx } from '../ui/Primitives';
 import { IconCheck, IconEdit, IconPin, IconPlus, IconSearch, IconTrash } from '../ui/Icons';
 
@@ -127,7 +128,7 @@ export function ConversationsView({
                         </span>
                         {last && (
                           <span className="mt-0.5 block truncate text-sm text-faint">
-                            {last.question}
+                            {rootQuestion(last.question)}
                           </span>
                         )}
                       </button>
