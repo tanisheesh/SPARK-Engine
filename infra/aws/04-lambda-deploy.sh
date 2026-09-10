@@ -54,6 +54,9 @@ EOF
 cat > "$ENV_DIR/usage.json" <<EOF
 {"Variables":{"SUBSCRIPTIONS_TABLE":"${TABLE_SUBSCRIPTIONS}","USAGE_TABLE":"${TABLE_USAGE}"}}
 EOF
+cat > "$ENV_DIR/managed-keys.json" <<EOF
+{"Variables":{"SUBSCRIPTIONS_TABLE":"${TABLE_SUBSCRIPTIONS}","MANAGED_GROQ_API_KEY":"${MANAGED_GROQ_API_KEY}","MANAGED_DEEPGRAM_API_KEY":"${MANAGED_DEEPGRAM_API_KEY}"}}
+EOF
 # Same Windows-path issue as the zip — the AWS CLI's Python process needs a
 # real path, not Git Bash's /tmp/... view of it.
 if command -v cygpath >/dev/null 2>&1; then
@@ -92,8 +95,9 @@ deploy_function "billing-create-order" "billing-create-order/index.handler" "$EN
 deploy_function "billing-verify-payment" "billing-verify-payment/index.handler" "$ENV_DIR/billing.json"
 deploy_function "billing-webhook"      "billing-webhook/index.handler"      "$ENV_DIR/billing.json"
 deploy_function "usage-consume"        "usage-consume/index.handler"        "$ENV_DIR/usage.json"
+deploy_function "managed-keys"         "managed-keys/index.handler"         "$ENV_DIR/managed-keys.json"
 
 rm -rf "$ENV_DIR"
 
 echo
-echo "All 5 Lambdas deployed. Next: 05-api-gateway.sh"
+echo "All 6 Lambdas deployed. Next: 05-api-gateway.sh"

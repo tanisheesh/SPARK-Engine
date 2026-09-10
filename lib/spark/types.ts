@@ -140,7 +140,6 @@ export interface ApiSettings {
 export type VoiceState =
   | 'idle'
   | 'listening'
-  | 'transcribing'
   | 'thinking'
   | 'querying'
   | 'answering'

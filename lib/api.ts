@@ -84,3 +84,18 @@ export interface UsageResult {
 export function consumeQuery(): Promise<UsageResult> {
   return authedFetch('/usage/consume', { method: 'POST', body: '{}' });
 }
+
+/* ---------- Managed keys (THUNDER only) ---------- */
+
+export interface ManagedKeys {
+  groqApiKey: string | null;
+  deepgramApiKey: string | null;
+}
+
+/** Only ever returns real keys for a THUNDER account — the Lambda checks
+    the tier itself, not just this client. Call once the plan is confirmed
+    as THUNDER; the keys are merged into the in-memory settings used for
+    API calls and are never written to disk. */
+export function fetchManagedKeys(): Promise<ManagedKeys> {
+  return authedFetch('/managed-keys');
+}
