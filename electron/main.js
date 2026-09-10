@@ -257,7 +257,7 @@ ipcMain.handle('open-external', async (event, url) => {
   }
 });
 
-ipcMain.handle('upload-csv', async (event) => {
+ipcMain.handle('upload-csv', async (event, maxSizeBytes) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
@@ -281,6 +281,17 @@ ipcMain.handle('upload-csv', async (event) => {
       const stats = fs.statSync(sourcePath);
       if (!stats.isFile()) {
         return { success: false, error: 'Selected item is not a file' };
+      }
+      // TIERS.txt's CSV size limit, enforced here — before any copy or
+      // import happens, not after, since that work is otherwise done
+      // synchronously below in the same handler.
+      if (maxSizeBytes && stats.size > maxSizeBytes) {
+        const gb = (stats.size / (1024 ** 3)).toFixed(1);
+        const limitGb = (maxSizeBytes / (1024 ** 3)).toFixed(0);
+        return {
+          success: false,
+          error: `This file is ${gb} GB, which is over your plan's ${limitGb} GB limit. Upgrade for more.`,
+        };
       }
     } catch (error) {
       return { success: false, error: 'Cannot access the selected file' };
@@ -659,8 +670,15 @@ ipcMain.handle('disconnect-database', async (event, { type }) => {
 });
 
 // Database connector handler
-ipcMain.handle('connect-database', async (event, { type, config }) => {
+ipcMain.handle('connect-database', async (event, { type, config, allowedTypes }) => {
   try {
+    // TIERS.txt's "db sources" line, enforced here — not just by disabling
+    // the tab in FileUpload.tsx, since that's a UI convenience, not a gate
+    // the renderer can be trusted to have applied honestly.
+    if (Array.isArray(allowedTypes) && !allowedTypes.includes(type)) {
+      return { success: false, error: `${type} is not available on your current plan. Upgrade to unlock it.` };
+    }
+
     const DatabaseConnector = require('./database-connector');
     const connector = new DatabaseConnector();
 
@@ -847,9 +865,10 @@ ipcMain.handle('get-database-schema', async (event, { connectionType, connection
       return { success: true, schema, graph };
       
     } else if (connectionType === 'sqlite') {
-      // Use SQLite's pragma commands
-      const sqlite3 = require('better-sqlite3');
-      const db = sqlite3(connectionConfig.database);
+      // Use SQLite's pragma commands. Node's built-in sqlite module needs no
+      // native compile step, unlike better-sqlite3.
+      const { DatabaseSync } = require('node:sqlite');
+      const db = new DatabaseSync(connectionConfig.database);
       
       // Get all tables
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();

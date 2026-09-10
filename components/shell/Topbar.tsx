@@ -1,24 +1,30 @@
 'use client';
 
 import React from 'react';
-import { IconSearch, IconPlus } from '../ui/Icons';
+import { IconSearch, IconClose } from '../ui/Icons';
 import { IconButton, Kbd, cx } from '../ui/Primitives';
 
 /* ============================================================
    A 44px rule with a title and one control. Everything else that
    wanted to live up here belongs in the palette behind it.
+
+   Starting a new conversation lives as a prominent button at the top
+   of the Sidebar (like Claude/ChatGPT) — it doesn't need a second,
+   smaller entry point up here too.
    ============================================================ */
 
 export function Topbar({
   title,
   subtitle,
   onOpenPalette,
-  onNewConversation,
+  onClose,
 }: {
   title: string;
   subtitle?: string;
   onOpenPalette: () => void;
-  onNewConversation?: () => void;
+  /** Shown instead of the palette control when a contextual view
+      (Data sources, Pricing) is open over the normal nav. */
+  onClose?: () => void;
 }) {
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line-subtle px-4">
@@ -42,9 +48,9 @@ export function Topbar({
         <Kbd>⌘K</Kbd>
       </button>
 
-      {onNewConversation && (
-        <IconButton label="New conversation" onClick={onNewConversation}>
-          <IconPlus size={15} />
+      {onClose && (
+        <IconButton label="Close" onClick={onClose}>
+          <IconClose size={14} />
         </IconButton>
       )}
     </header>

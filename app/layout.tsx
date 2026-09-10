@@ -22,20 +22,24 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SPARK",
+  // Electron takes the OS window/taskbar title from this <title> tag once
+  // the page loads (main.js's own BrowserWindow title gets overwritten by
+  // it), so this is the actual source of truth for branding there — not
+  // just an SEO nicety.
+  title: "SPARK Engine",
   description:
     "Talk to your data. Ask questions in plain English, get answers, charts and the SQL behind them.",
   keywords: ["Data Analytics", "SQL", "DuckDB", "Natural Language", "Voice"],
   authors: [{ name: "Tanish Poddar", url: "https://github.com/tanishpoddar" }],
   creator: "Tanish Poddar",
   openGraph: {
-    title: "SPARK",
+    title: "SPARK Engine",
     description: "Talk to your data.",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "SPARK",
+    title: "SPARK Engine",
     description: "Talk to your data.",
   },
 };

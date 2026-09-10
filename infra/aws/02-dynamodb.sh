@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Creates the 2 DynamoDB tables that replace Supabase Postgres. Both are
-# on-demand billing (no capacity planning) since usage is one desktop
+# Creates the 3 DynamoDB tables that replace Supabase Postgres. All three
+# are on-demand billing (no capacity planning) since usage is one desktop
 # app's worth of traffic, not a public API.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -26,5 +26,10 @@ create_table "$TABLE_PAYMENTS" \
   --attribute-definitions AttributeName=user_id,AttributeType=S AttributeName=razorpay_order_id,AttributeType=S \
   --key-schema AttributeName=user_id,KeyType=HASH AttributeName=razorpay_order_id,KeyType=RANGE
 
+# user_id (PK only) — query usage counters (queries this month / today).
+create_table "$TABLE_USAGE" \
+  --attribute-definitions AttributeName=user_id,AttributeType=S \
+  --key-schema AttributeName=user_id,KeyType=HASH
+
 echo
-echo "Tables ready: $TABLE_SUBSCRIPTIONS, $TABLE_PAYMENTS"
+echo "Tables ready: $TABLE_SUBSCRIPTIONS, $TABLE_PAYMENTS, $TABLE_USAGE"

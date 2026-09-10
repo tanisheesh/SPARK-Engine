@@ -16,6 +16,7 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLES = {
   subscriptions: process.env.SUBSCRIPTIONS_TABLE || 'spark-subscriptions',
   payments: process.env.PAYMENTS_TABLE || 'spark-payments',
+  usage: process.env.USAGE_TABLE || 'spark-usage',
 };
 
 module.exports = {

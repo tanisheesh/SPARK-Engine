@@ -247,7 +247,7 @@ function composeLocalAnswer(question, rows) {
 }
 
 // Main query handler with progress updates
-ipcMain.handle('process-query', async (event, { question, csvFile, settings }) => {
+ipcMain.handle('process-query', async (event, { question, csvFile, settings, voiceAllowed }) => {
   try {
     // The privacy level is read from disk here, NOT taken from the renderer
     // argument. A renderer-supplied level could be silently downgraded by a bug
@@ -464,15 +464,20 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
     }
     const usedLocalFallback = formatGen.source === 'local';
 
-    sendProgress('tts', 'Generating voice response...');
-
     // Generate TTS (only with API keys)
     let ttsData = { useBrowserTTS: false, text: textResponse, hasAudio: false };
-    
+
     // PRIVACY: the answer text here is fully detokenized — it contains the real
     // values. Sending it to Deepgram would hand a second vendor exactly what we
     // just withheld from Groq, so Strict and Local-only use browser TTS instead.
-    if (settings.deepgramApiKey && caps.cloudTts) {
+    // voiceAllowed carries the renderer's tier check (voice is IGNITE and
+    // up) — the main process has no notion of subscription tier on its own,
+    // so this is the one place that check actually gets enforced for the
+    // auto-play-on-completion path, not just the manual "speak" button.
+    // The stage is only announced when an attempt will actually happen — a
+    // FREE-tier query should never show a "Synthesising voice" step at all.
+    if (voiceAllowed && settings.deepgramApiKey && caps.cloudTts) {
+      sendProgress('tts', 'Generating voice response...');
       try {
         const audioContent = await callDeepgramTTS(textResponse, settings.deepgramApiKey);
         if (audioContent) {
@@ -524,8 +529,14 @@ ipcMain.handle('process-query', async (event, { question, csvFile, settings }) =
 });
 
 // Separate TTS generation handler
-ipcMain.handle('generate-tts', async (event, { text, settings }) => {
+ipcMain.handle('generate-tts', async (event, { text, settings, voiceAllowed }) => {
   try {
+    if (!voiceAllowed) {
+      return {
+        success: false,
+        error: 'Voice is not available on your current plan'
+      };
+    }
     if (!settings.deepgramApiKey) {
       return {
         success: false,

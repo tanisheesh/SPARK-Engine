@@ -105,6 +105,7 @@ export const IconLayers = make(<><path d="m12 3 9 5-9 5-9-5z" /><path d="m3 13 9
 export const IconZap = make(<><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></>, 'IconZap');
 export const IconKeyboard = make(<><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01" /><path d="M10 10h.01" /><path d="M14 10h.01" /><path d="M18 10h.01" /><path d="M8 14h8" /></>, 'IconKeyboard');
 export const IconUser = make(<><circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" /></>, 'IconUser');
+export const IconLock = make(<><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>, 'IconLock');
 
 /* ------------------------------------------------------------------
    The SPARK mark.
@@ -142,11 +143,9 @@ export function SparkLogo({ size = 18, showWord = true }: { size?: number; showW
     <span className="inline-flex select-none items-center gap-[7px]">
       <SparkMark size={size} />
       {showWord && (
-        <span
-          className="font-semibold tracking-[0.02em] text-ink"
-          style={{ fontSize: size * 0.78 }}
-        >
-          SPARK
+        <span className="whitespace-nowrap tracking-[0.02em]" style={{ fontSize: size * 0.78 }}>
+          <span className="font-semibold text-ink">SPARK</span>{' '}
+          <span className="font-medium text-faint">Engine</span>
         </span>
       )}
     </span>

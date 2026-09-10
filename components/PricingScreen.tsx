@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { IconClose, IconZap } from './ui/Icons';
-import { IconButton, Spinner, cx } from './ui/Primitives';
+import { Spinner, cx } from './ui/Primitives';
 import { PlanCard } from './billing/PlanCard';
 import { TIER_ORDER, TIERS_CONTENT } from '../lib/spark/tiers-content';
 import {
@@ -36,12 +35,11 @@ function loadRazorpayScript(): Promise<void> {
 
 interface PricingScreenProps {
   open: boolean;
-  onClose: () => void;
   user: SparkUser | null;
   toast: (text: string, tone?: 'success' | 'error') => void;
 }
 
-export function PricingScreen({ open, onClose, user, toast }: PricingScreenProps) {
+export function PricingScreen({ open, user, toast }: PricingScreenProps) {
   const [cycle, setCycle] = useState<BillingCycle>('monthly');
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
@@ -107,17 +105,9 @@ export function PricingScreen({ open, onClose, user, toast }: PricingScreenProps
   if (!open) return null;
 
   return (
-    <div
-      className="a-in fixed inset-0 z-50 flex flex-col bg-bg"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Pricing"
-    >
+    <div className="flex min-h-0 flex-1 flex-col" role="region" aria-label="Pricing">
       <div className="flex items-center gap-3 border-b border-line-subtle px-6 py-3">
-        <IconZap size={16} className="text-accent" />
-        <h1 className="text-lg font-semibold text-ink">Pricing</h1>
         <span className="flex-1" />
-
         <div className="flex items-center gap-1 rounded-md border border-line bg-surface2 p-0.5">
           {(['monthly', 'yearly'] as const).map((c) => (
             <button
@@ -133,10 +123,6 @@ export function PricingScreen({ open, onClose, user, toast }: PricingScreenProps
             </button>
           ))}
         </div>
-
-        <IconButton label="Close" onClick={onClose}>
-          <IconClose size={14} />
-        </IconButton>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">

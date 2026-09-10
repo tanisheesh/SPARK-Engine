@@ -71,7 +71,9 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  overflow: hidden; /* the panes scroll; the page never does */
+  /* The desktop app's own root shell clips itself (h-screen + overflow-hidden
+     in app/app/page.tsx) — body must stay scrollable so the landing page
+     route, which shares this global stylesheet, can scroll normally. */
   background: var(--bg);
   color: var(--text);
 }

@@ -169,6 +169,9 @@ function showSystemCheckSplash() {
     console.error('Failed to load icon:', error);
   }
 
+  // Same palette as FRONTEND_PALETTE.md / app/globals.css — this splash
+  // renders before the Next.js bundle loads, so it can't share those
+  // Tailwind tokens directly; the hex values are copied here instead.
   const splashHTML = `
     <!DOCTYPE html>
     <html>
@@ -184,128 +187,76 @@ function showSystemCheckSplash() {
           height: 100%;
           overflow: hidden;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-          background: #0f0a1a;
-          color: white;
+          background: #141515;
+          color: #E8E7E2;
         }
         body {
           display: flex;
           flex-direction: column;
           justify-content: center;
           align-items: center;
-          border-radius: 10px;
           position: relative;
-        }
-        /* Background grid pattern */
-        body::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(to right, #1a1221 1px, transparent 1px),
-                      linear-gradient(to bottom, #1a1221 1px, transparent 1px);
-          background-size: 4rem 4rem;
-          mask-image: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 110%);
-          -webkit-mask-image: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 110%);
-          pointer-events: none;
         }
         .logo-container {
           position: relative;
-          width: 150px;
-          height: 150px;
-          margin-bottom: 30px;
+          width: 96px;
+          height: 96px;
+          margin-bottom: 24px;
           z-index: 1;
           border-radius: 50%;
-          border: 4px solid rgba(217, 119, 6, 0.5);
-          background: linear-gradient(135deg, #0f172a, #1e293b);
-          box-shadow: 0 0 30px rgba(217, 119, 6, 0.4);
+          border: 1px solid rgba(143, 161, 124, 0.34);
+          background: #191A1A;
           overflow: hidden;
           display: flex;
           align-items: center;
           justify-content: center;
         }
         .logo-image {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
+          width: 60%;
+          height: 60%;
+          object-fit: contain;
           object-position: center;
         }
         .logo-text {
-          font-size: 32px;
-          font-weight: 900;
-          background: linear-gradient(to right, #D97706, #EA580C, #D97706);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          margin-bottom: 30px;
-          letter-spacing: 3px;
-          text-shadow: 0 0 20px rgba(217, 119, 6, 0.3);
+          font-size: 20px;
+          font-weight: 600;
+          color: #E8E7E2;
+          margin-bottom: 22px;
+          letter-spacing: 0.06em;
           z-index: 1;
         }
         .status {
-          font-size: 16px;
+          font-size: 13px;
           font-weight: 400;
-          color: rgba(217, 119, 6, 0.7);
+          color: #70716C;
           text-align: center;
-          margin-top: 10px;
+          margin-top: 4px;
           z-index: 1;
         }
         .spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid rgba(217, 119, 6, 0.1);
-          border-top: 4px solid #D97706;
+          width: 22px;
+          height: 22px;
+          border: 2px solid rgba(143, 161, 124, 0.16);
+          border-top: 2px solid #8FA17C;
           border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin: 20px 0;
-          box-shadow: 0 0 20px rgba(217, 119, 6, 0.3);
+          animation: spin 0.9s linear infinite;
+          margin: 4px 0 14px;
           z-index: 1;
         }
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
         }
-        /* Animated blobs */
-        .blob {
-          position: absolute;
-          border-radius: 50%;
-          filter: blur(60px);
-          opacity: 0.3;
-          animation: float 8s ease-in-out infinite;
-          pointer-events: none;
-        }
-        .blob-orange {
-          width: 300px;
-          height: 300px;
-          background: rgba(217, 119, 6, 0.3);
-          top: 10%;
-          left: 15%;
-          animation-delay: 0s;
-        }
-        .blob-purple {
-          width: 300px;
-          height: 300px;
-          background: rgba(139, 92, 246, 0.2);
-          bottom: 10%;
-          right: 15%;
-          animation-delay: 2s;
-        }
-        @keyframes float {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -30px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-        }
       </style>
     </head>
     <body>
-      <div class="blob blob-orange"></div>
-      <div class="blob blob-purple"></div>
-      
       <div class="logo-container">
-        <img src="${iconBase64}" alt="SPARK Engine Logo" class="logo-image" />
+        <img src="${iconBase64}" alt="SPARK Engine" class="logo-image" />
       </div>
-      
+
       <div class="logo-text">SPARK ENGINE</div>
       <div class="spinner"></div>
-      <div class="status">Checking System Requirements ...</div>
+      <div class="status">Checking system requirements…</div>
     </body>
     </html>
   `;

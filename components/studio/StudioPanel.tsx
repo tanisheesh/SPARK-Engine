@@ -1,12 +1,11 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ACTION_BY_ID,
   STUDIO_ACTIONS,
   STUDIO_GROUPS,
   availability,
-  suggestedActions,
   type StudioAction,
   type StudioGroup,
 } from '../../lib/spark/studio';
@@ -17,6 +16,7 @@ import {
   IconAnomaly,
   IconBreakdown,
   IconChart,
+  IconChevronRight,
   IconCompare,
   IconDashboard,
   IconDeepDive,
@@ -30,6 +30,8 @@ import {
   IconSurprise,
   IconTable,
 } from '../ui/Icons';
+
+const COLLAPSE_KEY = 'spark.studio.collapsed';
 
 const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   chart: IconChart,
@@ -74,13 +76,60 @@ export function StudioPanel({
   onJumpToTurn,
 }: StudioPanelProps) {
   const [tab, setTab] = useState<Tab>('generate');
-  const suggested = useMemo(() => suggestedActions(turn, connected), [turn, connected]);
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1');
+    } catch {
+      /* localStorage unavailable — stay expanded */
+    }
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
+      } catch {
+        /* best-effort persistence only */
+      }
+      return next;
+    });
+  };
+
+  if (collapsed) {
+    return (
+      <div className="relative flex h-full shrink-0">
+        <aside
+          aria-label="Studio"
+          className="flex h-full w-[44px] shrink-0 flex-col items-center border-l border-line-subtle bg-surface pt-3.5"
+        >
+          <IconSurprise size={16} className="text-faint" aria-hidden="true" />
+        </aside>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          title="Expand Studio"
+          aria-label="Expand Studio"
+          className={cx(
+            'absolute top-1/2 z-10 flex h-9 w-4 -translate-y-1/2 items-center justify-center',
+            'rounded-full border border-line bg-surface2 text-faint shadow-pop',
+            'transition-colors duration-1 ease-out hover:border-accent-line hover:bg-surface3 hover:text-ink'
+          )}
+          style={{ left: -8 }}
+        >
+          <IconChevronRight size={11} className="rotate-180" />
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <aside
-      aria-label="Studio"
-      className="flex h-full w-[272px] shrink-0 flex-col border-l border-line-subtle bg-surface"
-    >
+    <div className="relative flex h-full shrink-0">
+      <aside
+        aria-label="Studio"
+        className="flex h-full w-[272px] shrink-0 flex-col border-l border-line-subtle bg-surface"
+      >
       <header className="px-4 pb-3 pt-3.5">
         <h2 className="text-lg font-semibold leading-tight text-ink">Studio</h2>
         <p className="mt-0.5 text-sm leading-snug text-faint">
@@ -128,25 +177,6 @@ export function StudioPanel({
             </div>
           )}
 
-          {/* Ranked by the question and the shape of its result. The full
-              catalogue stays below in a fixed order, so nothing the user
-              reached for a moment ago moves. */}
-          {suggested.length > 0 && !runningAction && (
-            <Section label="Suggested">
-              {suggested.map((id) => (
-                <ActionRow
-                  key={id}
-                  action={ACTION_BY_ID[id]}
-                  turn={turn}
-                  connected={connected}
-                  busy={busy}
-                  suggested
-                  onRun={onRun}
-                />
-              ))}
-            </Section>
-          )}
-
           {STUDIO_GROUPS.map((g) => (
             <Group key={g.id} group={g} turn={turn} connected={connected} busy={busy} onRun={onRun} />
           ))}
@@ -184,7 +214,25 @@ export function StudioPanel({
           )}
         </div>
       )}
-    </aside>
+      </aside>
+
+      {/* Edge-mounted fold handle — same fixed spot as the sidebar's,
+          straddling the border, regardless of collapsed state. */}
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        title="Collapse Studio"
+        aria-label="Collapse Studio"
+        className={cx(
+          'absolute top-1/2 z-10 flex h-9 w-4 -translate-y-1/2 items-center justify-center',
+          'rounded-full border border-line bg-surface2 text-faint shadow-pop',
+          'transition-colors duration-1 ease-out hover:border-accent-line hover:bg-surface3 hover:text-ink'
+        )}
+        style={{ left: -8 }}
+      >
+        <IconChevronRight size={11} />
+      </button>
+    </div>
   );
 }
 

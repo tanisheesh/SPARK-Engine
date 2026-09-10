@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Creates an HTTP API in front of the 4 billing Lambdas, with a Cognito JWT
-# authorizer on every route except the public Razorpay webhook. Electron's
-# renderer is a real browser context, so CORS applies even though this
-# isn't a public website — every protected route still requires a valid
-# Cognito ID token regardless of origin.
+# Creates an HTTP API in front of the 5 billing/usage Lambdas, with a
+# Cognito JWT authorizer on every route except the public Razorpay
+# webhook. Electron's renderer is a real browser context, so CORS applies
+# even though this isn't a public website — every protected route still
+# requires a valid Cognito ID token regardless of origin.
+#
+# This script creates a brand-new API — safe only for first-time setup.
+# If API_ID is already set (an API exists), adding a single new route to
+# it is a few `aws apigatewayv2` calls, not a re-run of this whole script
+# (re-running would create a second, duplicate API).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source ./00-env.sh
@@ -75,6 +80,7 @@ add_route "GET"    "/billing/status"       "billing-status"         "yes"
 add_route "POST"   "/billing/create-order" "billing-create-order"   "yes"
 add_route "POST"   "/billing/verify-payment" "billing-verify-payment" "yes"
 add_route "POST"   "/billing/webhook"      "billing-webhook"        "no"
+add_route "POST"   "/usage/consume"        "usage-consume"          "yes"
 
 echo "==> Deploying \$default auto-deploy stage"
 aws apigatewayv2 create-stage \

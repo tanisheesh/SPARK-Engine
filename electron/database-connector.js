@@ -139,8 +139,13 @@ class DatabaseConnector {
         throw new Error('SQLite database file not found');
       }
 
-      const Database = require('better-sqlite3');
-      const db = new Database(config.filePath, { readonly: true });
+      // Node's built-in sqlite module — no native compile step, unlike
+      // better-sqlite3, so this never blocks `npm install` on a machine
+      // without build tools. Only used here to list table names; the
+      // actual data import runs entirely through DuckDB's own sqlite
+      // extension below.
+      const { DatabaseSync } = require('node:sqlite');
+      const db = new DatabaseSync(config.filePath, { readOnly: true });
       console.log('✅ SQLite connected successfully');
 
       // Get all tables

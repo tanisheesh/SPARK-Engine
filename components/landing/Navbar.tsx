@@ -46,7 +46,9 @@ export default function Navbar() {
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
         <a href="/" className="flex items-center gap-2">
           <SparkMark size={16} />
-          <span className="font-semibold text-sm tracking-tight" style={{ color: '#F5F5F5' }}>SPARK</span>
+          <span className="font-semibold text-sm tracking-tight" style={{ color: '#F5F5F5' }}>
+            SPARK <span style={{ color: '#9A9A9A', fontWeight: 500 }}>Engine</span>
+          </span>
         </a>
 
         <nav className="hidden md:flex items-center gap-6">

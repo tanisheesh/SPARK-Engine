@@ -64,3 +64,23 @@ export function verifyPayment(
     body: JSON.stringify({ orderId, paymentId, signature }),
   });
 }
+
+/* ---------- Usage (query limits from TIERS.txt) ---------- */
+
+export interface UsageResult {
+  allowed: boolean;
+  reason?: 'monthly' | 'daily';
+  tier: Tier;
+  queriesMonth: number;
+  queriesDay: number;
+  limitMonth: number | null; // null = unlimited (THUNDER)
+  limitDay: number | null;
+}
+
+/** Called right before a question is sent to Groq — this is the actual
+    enforcement of TIERS.txt's "queries per month / per day" limits.
+    Increments the counters server-side and returns whether this query is
+    allowed under the caller's current tier. */
+export function consumeQuery(): Promise<UsageResult> {
+  return authedFetch('/usage/consume', { method: 'POST', body: '{}' });
+}

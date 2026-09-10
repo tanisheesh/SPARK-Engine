@@ -23,7 +23,6 @@
     "@duckdb/node-api": "^1.5.5-r.4",
     "@types/papaparse": "^5.5.2",
     "annyang": "^2.6.1",
-    "better-sqlite3": "^12.6.0",
     "dagre": "^0.8.5",
     "dotenv": "^17.2.3",
     "electron-updater": "^6.8.3",
@@ -74,7 +73,6 @@
       "!node_modules/@node-llama-cpp/*-vulkan*"
     ],
     "asarUnpack": [
-      "node_modules/better-sqlite3/**",
       "node_modules/@duckdb/node-bindings-*/**",
       "node_modules/@node-llama-cpp/**",
       "node_modules/node-llama-cpp/**",
@@ -155,11 +153,13 @@
     }
   },
   "allowScripts": {
-    "better-sqlite3@12.11.1": true,
     "electron@42.11.3": true,
     "node-llama-cpp@3.20.0": true,
     "unrs-resolver@1.12.2": true,
     "electron-winstaller@5.4.0": true,
     "sharp@0.35.4": true
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

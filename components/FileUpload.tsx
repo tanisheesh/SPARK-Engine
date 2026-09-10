@@ -8,7 +8,10 @@ import {
   type DatabaseSourceType,
   type FileSourceType
 } from '../lib/data-sources';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Button, EmptyState, Field, IconButton, Input, StatusDot, cx } from './ui/Primitives';
+import { IconCheck, IconClose, IconData, IconFile, IconLock, IconPlug, IconTrash } from './ui/Icons';
+import { quotaFor } from '../lib/spark/quotas';
+import type { Tier } from '../lib/api';
 
 interface CSVFile {
   name: string;
@@ -30,34 +33,82 @@ interface FileUploadProps {
   onClose: () => void;
   onFileSelected: (file: CSVFile, type: DataSourceType, config?: any) => void;
   currentDatasetType: DataSourceType | null;
+  plan: Tier | null;
+  onUpgrade?: () => void;
 }
 
 type TabType = DataSourceType;
 
 // Per-file-source copy for the shared upload panel. The three file tabs are the
 // same UI over a different extension filter.
-const FILE_TAB_COPY: Record<FileSourceType, { icon: string; title: string; blurb: string; noun: string }> = {
+const FILE_TAB_COPY: Record<FileSourceType, { title: string; blurb: string; noun: string }> = {
   csv: {
-    icon: '📊',
-    title: 'Upload New CSV File',
+    title: 'Upload a CSV file',
     blurb: 'Select a CSV file from your computer to analyze with SPARK Engine',
     noun: 'CSV'
   },
   xlsx: {
-    icon: '📗',
-    title: 'Upload New Excel Workbook',
+    title: 'Upload an Excel workbook',
     blurb: 'Select an .xlsx or .xls workbook — every sheet becomes its own table',
     noun: 'workbook'
   },
   json: {
-    icon: '📋',
-    title: 'Upload New JSON File',
+    title: 'Upload a JSON file',
     blurb: 'Select a .json file — an array of records works best',
     noun: 'JSON'
   }
 };
 
-export default function FileUpload({ isOpen, onClose, onFileSelected, currentDatasetType }: FileUploadProps) {
+// Field spec for the generic database connection form — every DB tab except
+// Supabase (which takes one connection-string textarea, handled separately)
+// renders from this.
+interface DbField {
+  key: string;
+  label: string;
+  placeholder?: string;
+  type?: 'text' | 'password';
+  optional?: boolean;
+  span?: 2;
+}
+
+const DB_FIELDS: Partial<Record<DatabaseSourceType, DbField[]>> = {
+  mysql: [
+    { key: 'host', label: 'Host', placeholder: 'localhost' },
+    { key: 'port', label: 'Port', placeholder: '3306' },
+    { key: 'user', label: 'Username', placeholder: 'root' },
+    { key: 'password', label: 'Password', type: 'password', placeholder: '••••••••' },
+    { key: 'database', label: 'Database', placeholder: 'my_database', span: 2 },
+    { key: 'table', label: 'Table', placeholder: 'Leave blank for all tables', optional: true, span: 2 },
+  ],
+  postgresql: [
+    { key: 'host', label: 'Host', placeholder: 'localhost' },
+    { key: 'port', label: 'Port', placeholder: '5432' },
+    { key: 'user', label: 'Username', placeholder: 'postgres' },
+    { key: 'password', label: 'Password', type: 'password', placeholder: '••••••••' },
+    { key: 'database', label: 'Database', placeholder: 'my_database', span: 2 },
+    { key: 'table', label: 'Table', placeholder: 'Leave blank for all tables', optional: true, span: 2 },
+  ],
+  sqlite: [
+    { key: 'filePath', label: 'Database file path', placeholder: 'C:\\path\\to\\database.db', span: 2 },
+    { key: 'table', label: 'Table', placeholder: 'Leave blank for all tables', optional: true, span: 2 },
+  ],
+};
+
+const DB_LABEL: Record<DatabaseSourceType, string> = {
+  mysql: 'MySQL',
+  sqlite: 'SQLite',
+  postgresql: 'PostgreSQL',
+  supabase: 'Supabase',
+};
+
+// A connection is ready to attempt once every non-optional field has a value.
+function isDbConfigComplete(type: DatabaseSourceType, config: any): boolean {
+  if (type === 'supabase') return !!config.connectionString?.trim();
+  const fields = DB_FIELDS[type] ?? [];
+  return fields.every((f) => f.optional || String(config[f.key] ?? '').trim().length > 0);
+}
+
+export default function FileUpload({ isOpen, onClose, onFileSelected, currentDatasetType, plan, onUpgrade }: FileUploadProps) {
   const [activeTab, setActiveTab] = useState<TabType>('csv');
   const [csvFiles, setCsvFiles] = useState<CSVFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -72,7 +123,7 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
   const [isConnected, setIsConnected] = useState(false);
   const [connectionType, setConnectionType] = useState<DataSourceType | null>(null);
   const [isFromSavedConnection, setIsFromSavedConnection] = useState(false);
-  
+
   // Saved connections
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
 
@@ -108,11 +159,18 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
     table: ''
   });
 
+  const CONFIG_FOR: Record<DatabaseSourceType, { config: any; setConfig: (c: any) => void }> = {
+    mysql: { config: mysqlConfig, setConfig: setMysqlConfig },
+    sqlite: { config: sqliteConfig, setConfig: setSqliteConfig },
+    postgresql: { config: postgresConfig, setConfig: setPostgresConfig },
+    supabase: { config: supabaseConfig, setConfig: setSupabaseConfig },
+  };
+
   useEffect(() => {
     if (isOpen) {
       loadCSVFiles();
       loadSavedConnections();
-      
+
       // Listen for upload progress
       if (window.electronAPI) {
         const progressHandler = (event: any, progress: any) => {
@@ -130,9 +188,9 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
             }, 3000);
           }
         };
-        
+
         window.electronAPI.onUploadProgress(progressHandler);
-        
+
         return () => {
           if (window.electronAPI) {
             window.electronAPI.removeAllListeners('upload-progress');
@@ -191,15 +249,23 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
     const connectionName = connectionLabel(type, config);
 
     // Check if connection already exists
-    const existingConnection = savedConnections.find(conn => 
+    const existingConnection = savedConnections.find(conn =>
       conn.type === type && conn.name === connectionName
     );
-    
+
     if (existingConnection) {
       alert('This connection is already saved!');
       return;
     }
-    
+
+    // TIERS.txt's "DB connections saved" limit.
+    const limit = quotaFor(plan).savedConnections;
+    if (limit !== null && savedConnections.length >= limit) {
+      alert(`Your plan can save up to ${limit} connection${limit === 1 ? '' : 's'}. Delete one, or upgrade for more.`);
+      onUpgrade?.();
+      return;
+    }
+
     const newConnection: SavedConnection = {
       id: Date.now().toString(),
       type,
@@ -207,11 +273,10 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
       config,
       savedAt: new Date()
     };
-    
+
     const updated = [...savedConnections, newConnection];
     setSavedConnections(updated);
     localStorage.setItem('savedDatabaseConnections', JSON.stringify(updated));
-    alert('Connection saved successfully!');
   };
 
   const deleteConnection = (id: string) => {
@@ -223,20 +288,8 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
   };
 
   const loadSavedConnection = (conn: SavedConnection) => {
-    if (conn.type === 'mysql') {
-      setMysqlConfig(conn.config);
-      setActiveTab('mysql');
-    } else if (conn.type === 'sqlite') {
-      setSqliteConfig(conn.config);
-      setActiveTab('sqlite');
-    } else if (conn.type === 'postgresql') {
-      setPostgresConfig(conn.config);
-      setActiveTab('postgresql');
-    } else if (conn.type === 'supabase') {
-      setSupabaseConfig(conn.config);
-      setActiveTab('supabase');
-    }
-    
+    CONFIG_FOR[conn.type].setConfig(conn.config);
+    setActiveTab(conn.type);
     // Mark that this connection is from saved list
     setIsFromSavedConnection(true);
   };
@@ -244,10 +297,14 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
   const handleUpload = async () => {
     setIsUploading(true);
     setUploadProgress({ stage: 'starting', progress: 0, message: 'Preparing upload...' });
-    
+
     try {
       if (window.electronAPI) {
-        const result = await window.electronAPI.uploadCSV();
+        // TIERS.txt's CSV size limit — checked in the main process before
+        // any copy/import happens, not after (see electron/main.js).
+        const csvSizeGb = quotaFor(plan).csvSizeGb;
+        const maxSizeBytes = csvSizeGb != null ? csvSizeGb * 1024 ** 3 : undefined;
+        const result = await window.electronAPI.uploadCSV(maxSizeBytes);
         if (result.success) {
           setUploadProgress({ stage: 'complete', progress: 100, message: 'Upload completed successfully!' });
           setTimeout(() => {
@@ -276,16 +333,16 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
   const handleDatabaseConnect = async (dbType: DatabaseSourceType) => {
     setIsUploading(true);
     setUploadProgress({ stage: 'starting', progress: 0, message: 'Connecting to database...' });
-    
+
     try {
       if (window.electronAPI) {
-        let config;
-        if (dbType === 'mysql') config = mysqlConfig;
-        else if (dbType === 'sqlite') config = sqliteConfig;
-        else if (dbType === 'supabase') config = supabaseConfig;
-        else config = postgresConfig;
+        const config = CONFIG_FOR[dbType].config;
 
-        const result = await window.electronAPI.connectDatabase({ type: dbType, config });
+        const result = await window.electronAPI.connectDatabase({
+          type: dbType,
+          config,
+          allowedTypes: quotaFor(plan).allowedSources,
+        });
 
         if (result.success) {
           setIsConnected(true);
@@ -300,12 +357,12 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
             size: 0,
             modified: new Date()
           };
-          
+
           // Notify parent component with config
           onFileSelected(connectionFile, dbType, config);
-          
+
           setUploadProgress({ stage: 'complete', progress: 100, message: result.message });
-          
+
           // Wait a bit before closing to ensure backend is ready
           setTimeout(() => {
             setUploadProgress(null);
@@ -334,32 +391,25 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
     if (connectionType && window.electronAPI) {
       try {
         await window.electronAPI.disconnectDatabase({ type: connectionType as any });
-        console.log(`✅ Disconnected from ${connectionType}`);
       } catch (error) {
         console.error('Error disconnecting:', error);
       }
     }
-    
+
     setIsConnected(false);
     setConnectionType(null);
     setIsFromSavedConnection(false);
     setSelectedFile('');
-    
+
     // Clear parent's dataset type
     onFileSelected({ name: '', path: '', size: 0, modified: new Date() }, 'csv');
-    
+
     loadCSVFiles();
   };
 
   const handleSaveConnection = () => {
-    if (connectionType === 'mysql') {
-      saveConnection('mysql', mysqlConfig);
-    } else if (connectionType === 'sqlite') {
-      saveConnection('sqlite', sqliteConfig);
-    } else if (connectionType === 'postgresql') {
-      saveConnection('postgresql', postgresConfig);
-    } else if (connectionType === 'supabase') {
-      saveConnection('supabase', supabaseConfig);
+    if (connectionType && connectionType in CONFIG_FOR) {
+      saveConnection(connectionType as DatabaseSourceType, CONFIG_FOR[connectionType as DatabaseSourceType].config);
     }
   };
 
@@ -413,7 +463,6 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
     try {
       if (window.electronAPI) {
         await window.electronAPI.disconnectDatabase({ type: (connectionType as DataSourceType) || 'csv' });
-        console.log('✅ Disconnected from uploaded files');
       }
     } catch (error) {
       console.error('Error disconnecting file source:', error);
@@ -431,12 +480,9 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
     if (confirm(`Are you sure you want to delete "${fileName}"?`)) {
       try {
         if (window.electronAPI) {
-          // Call electron API to delete the file
           const result = await window.electronAPI.deleteCSV(fileName);
           if (result.success) {
-            // Refresh the file list
             loadCSVFiles();
-            // Clear selection if deleted file was selected
             if (selectedFile === fileName) {
               setSelectedFile('');
             }
@@ -459,14 +505,14 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const tabs = [
-    { id: 'csv' as TabType, label: 'CSV Upload', icon: '📊' },
-    { id: 'xlsx' as TabType, label: 'Excel', icon: '📗' },
-    { id: 'json' as TabType, label: 'JSON', icon: '📋' },
-    { id: 'mysql' as TabType, label: 'MySQL', icon: '🐬' },
-    { id: 'sqlite' as TabType, label: 'SQLite', icon: '💾' },
-    { id: 'postgresql' as TabType, label: 'PostgreSQL', icon: '🐘' },
-    { id: 'supabase' as TabType, label: 'Supabase', icon: '⚡' }
+  const tabs: { id: TabType; label: string; kind: 'file' | 'db' }[] = [
+    { id: 'csv', label: 'CSV', kind: 'file' },
+    { id: 'xlsx', label: 'Excel', kind: 'file' },
+    { id: 'json', label: 'JSON', kind: 'file' },
+    { id: 'mysql', label: 'MySQL', kind: 'db' },
+    { id: 'sqlite', label: 'SQLite', kind: 'db' },
+    { id: 'postgresql', label: 'PostgreSQL', kind: 'db' },
+    { id: 'supabase', label: 'Supabase', kind: 'db' },
   ];
 
   // The upload dialog accepts every supported type, so the shared file list is
@@ -475,660 +521,371 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
     ? csvFiles.filter(file => matchesFileSource(file.name, activeTab as FileSourceType))
     : [];
 
+  if (!isOpen) return null;
+
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            className="bg-slate-950 rounded-3xl border-2 border-orange-600/30 p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3 mb-8">
-              <span className="text-3xl">🗄️</span>
-              <h2 className="text-2xl font-bold text-orange-500 font-mono">DATA SOURCE MANAGER</h2>
-            </div>
+    <div className="flex min-h-0 flex-1 flex-col" role="region" aria-label="Data sources">
+      {/* Tabs */}
+      <div className="flex gap-5 overflow-x-auto border-b border-line-subtle px-6">
+        {tabs.map((tab) => {
+          const isActiveConnection = currentDatasetType === tab.id;
+          const isLocked = !quotaFor(plan).allowedSources.includes(tab.id);
+          const isDisabled = isLocked || !!(currentDatasetType && currentDatasetType !== tab.id);
+          const Icon = tab.kind === 'db' ? IconData : IconFile;
 
-            {/* Tabs */}
-            <div className="flex gap-2 mb-8 overflow-x-auto">
-              {tabs.map((tab) => {
-                const isActiveConnection = currentDatasetType === tab.id;
-                const isDisabled = !!(currentDatasetType && currentDatasetType !== tab.id);
-                
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => !isDisabled && setActiveTab(tab.id)}
-                    disabled={isDisabled}
-                    className={`relative px-6 py-3 rounded-xl font-mono font-bold transition-all whitespace-nowrap ${
-                      activeTab === tab.id
-                        ? 'bg-gradient-to-r from-orange-600 to-purple-600 text-white shadow-lg shadow-orange-600/30'
-                        : isDisabled
-                        ? 'bg-slate-900/50 text-slate-600 cursor-not-allowed'
-                        : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-                    }`}
-                  >
-                    {/* Green dot indicator for active connection */}
-                    {isActiveConnection && (
-                      <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-4 w-4 bg-green-500 border-2 border-slate-950"></span>
-                      </span>
-                    )}
-                    {tab.icon} {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Progress Bar */}
-            {uploadProgress && (
-              <div className="mb-6">
-                <div className="bg-slate-800 rounded-full h-3 mb-2 overflow-hidden">
-                  <div 
-                    className={`h-full transition-all duration-300 ${
-                      uploadProgress.stage === 'error' ? 'bg-red-500' : 'bg-orange-600'
-                    }`}
-                    style={{ width: `${uploadProgress.progress}%` }}
-                  />
-                </div>
-                <p className={`text-sm font-mono ${
-                  uploadProgress.stage === 'error' ? 'text-red-400' : 'text-orange-500'
-                }`}>
-                  {uploadProgress.message}
-                </p>
-              </div>
-            )}
-
-            {/* File upload tabs - CSV, Excel and JSON share this panel */}
-            {isFileSource(activeTab) && (
-              <div className="space-y-6">
-                <div className="border-2 border-dashed border-orange-600/30 rounded-2xl p-8 text-center bg-slate-900/30">
-                  <div className="mb-4">
-                    <span className="text-6xl">{FILE_TAB_COPY[activeTab as FileSourceType].icon}</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-orange-500 mb-2">
-                    {FILE_TAB_COPY[activeTab as FileSourceType].title}
-                  </h3>
-                  <p className="text-slate-400 mb-6">
-                    {FILE_TAB_COPY[activeTab as FileSourceType].blurb}
-                  </p>
-
-                  <button
-                    onClick={handleUpload}
-                    disabled={isUploading}
-                    className="px-8 py-4 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-white font-bold transition-all shadow-lg shadow-orange-600/30"
-                  >
-                    {isUploading ? '⏳ Uploading...' : '📁 Browse & Upload'}
-                  </button>
-                </div>
-
-                {/* File List */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-bold text-orange-500 font-mono">📋 AVAILABLE DATASETS</h3>
-                  
-                  {visibleFiles.length === 0 ? (
-                    <div className="text-center py-8 text-slate-400">
-                      <span className="text-4xl mb-4 block">📂</span>
-                      <p>No {FILE_TAB_COPY[activeTab as FileSourceType].noun} datasets uploaded yet</p>
-                      <p className="text-sm">Upload your first dataset to get started</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {visibleFiles.map((file, index) => (
-                        <motion.div
-                          key={file.name}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.1 }}
-                          className={`p-4 rounded-xl border-2 transition-all ${
-                            selectedFile === file.name
-                              ? 'border-orange-500 bg-orange-600/10'
-                              : 'border-slate-600 bg-slate-900/50 hover:border-slate-500'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div 
-                              className="flex items-center gap-3 flex-1 cursor-pointer"
-                              onClick={() => setSelectedFile(file.name)}
-                            >
-                              <span className="text-2xl">{FILE_TAB_COPY[activeTab as FileSourceType].icon}</span>
-                              <div>
-                                <h4 className="font-bold text-white">{file.name}</h4>
-                                <p className="text-sm text-slate-400">
-                                  {formatFileSize(file.size)}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              {selectedFile === file.name && (
-                                <span className="text-orange-500 text-xl">✓</span>
-                              )}
-                              <div className={`w-4 h-4 rounded-full border-2 ${
-                                selectedFile === file.name
-                                  ? 'border-orange-500 bg-orange-500'
-                                  : 'border-slate-500'
-                              }`} />
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteCSV(file.name);
-                                }}
-                                className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-white text-sm transition-colors"
-                              >
-                                🗑️ Delete
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* MySQL Tab */}
-            {activeTab === 'mysql' && (
-              <div className="space-y-4">
-                {/* Saved Connections */}
-                {savedConnections.filter(c => c.type === 'mysql').length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-bold text-orange-500 mb-3 font-mono">💾 SAVED CONNECTIONS</h3>
-                    <div className="space-y-2">
-                      {savedConnections.filter(c => c.type === 'mysql').map((conn) => (
-                        <div key={conn.id} className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-slate-600">
-                          <button
-                            onClick={() => loadSavedConnection(conn)}
-                            className="flex-1 text-left text-white hover:text-orange-500 transition-colors"
-                          >
-                            🐬 {conn.name}
-                          </button>
-                          <button
-                            onClick={() => deleteConnection(conn.id)}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-white text-sm transition-colors"
-                          >
-                            🗑️ Delete
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {!isConnected || connectionType !== 'mysql' ? (
-                  <div className="bg-slate-900/50 rounded-2xl p-6 border border-orange-600/20">
-                    <h3 className="text-lg font-bold text-orange-500 mb-4 font-mono">🐬 MySQL Connection</h3>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Host</label>
-                        <input
-                          type="text"
-                          value={mysqlConfig.host}
-                          onChange={(e) => setMysqlConfig({...mysqlConfig, host: e.target.value})}
-                          placeholder="localhost"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Port</label>
-                        <input
-                          type="text"
-                          value={mysqlConfig.port}
-                          onChange={(e) => setMysqlConfig({...mysqlConfig, port: e.target.value})}
-                          placeholder="3306"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Username</label>
-                        <input
-                          type="text"
-                          value={mysqlConfig.user}
-                          onChange={(e) => setMysqlConfig({...mysqlConfig, user: e.target.value})}
-                          placeholder="root"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Password</label>
-                        <input
-                          type="password"
-                          value={mysqlConfig.password}
-                          onChange={(e) => setMysqlConfig({...mysqlConfig, password: e.target.value})}
-                          placeholder="••••••••"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Database</label>
-                        <input
-                          type="text"
-                          value={mysqlConfig.database}
-                          onChange={(e) => setMysqlConfig({...mysqlConfig, database: e.target.value})}
-                          placeholder="my_database"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Table (Optional)</label>
-                        <input
-                          type="text"
-                          value={mysqlConfig.table}
-                          onChange={(e) => setMysqlConfig({...mysqlConfig, table: e.target.value})}
-                          placeholder="Leave blank for all tables"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleDatabaseConnect('mysql')}
-                      disabled={isUploading || !mysqlConfig.user || !mysqlConfig.database}
-                      className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all"
-                    >
-                      {isUploading ? '⏳ Connecting...' : '🔗 Connect & Import All Tables'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bg-green-500/10 border-2 border-green-500/30 rounded-2xl p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <span className="text-3xl">✅</span>
-                      <div>
-                        <h3 className="text-xl font-bold text-green-400">Connected to MySQL</h3>
-                        <p className="text-slate-300">{mysqlConfig.database}@{mysqlConfig.host}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleDisconnect}
-                        className={`${isFromSavedConnection ? 'w-full' : 'flex-1'} px-6 py-3 bg-slate-800 hover:bg-slate-600 rounded-lg text-white font-bold transition-colors`}
-                      >
-                        🔌 Disconnect
-                      </button>
-                      {!isFromSavedConnection && (
-                        <button
-                          onClick={handleSaveConnection}
-                          className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 rounded-lg text-white font-bold transition-all"
-                        >
-                          💾 Save Connection
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* SQLite Tab */}
-            {activeTab === 'sqlite' && (
-              <div className="space-y-4">
-                {/* Saved Connections */}
-                {savedConnections.filter(c => c.type === 'sqlite').length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-bold text-orange-500 mb-3 font-mono">💾 SAVED CONNECTIONS</h3>
-                    <div className="space-y-2">
-                      {savedConnections.filter(c => c.type === 'sqlite').map((conn) => (
-                        <div key={conn.id} className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-slate-600">
-                          <button
-                            onClick={() => loadSavedConnection(conn)}
-                            className="flex-1 text-left text-white hover:text-orange-500 transition-colors"
-                          >
-                            💾 {conn.name}
-                          </button>
-                          <button
-                            onClick={() => deleteConnection(conn.id)}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-white text-sm transition-colors"
-                          >
-                            🗑️ Delete
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {!isConnected || connectionType !== 'sqlite' ? (
-                  <div className="bg-slate-900/50 rounded-2xl p-6 border border-orange-600/20">
-                    <h3 className="text-lg font-bold text-orange-500 mb-4 font-mono">💾 SQLite Connection</h3>
-                    
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Database File Path</label>
-                        <input
-                          type="text"
-                          value={sqliteConfig.filePath}
-                          onChange={(e) => setSqliteConfig({...sqliteConfig, filePath: e.target.value})}
-                          placeholder="C:\path\to\database.db"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Table (Optional)</label>
-                        <input
-                          type="text"
-                          value={sqliteConfig.table}
-                          onChange={(e) => setSqliteConfig({...sqliteConfig, table: e.target.value})}
-                          placeholder="Leave blank for all tables"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleDatabaseConnect('sqlite')}
-                      disabled={isUploading || !sqliteConfig.filePath}
-                      className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all"
-                    >
-                      {isUploading ? '⏳ Connecting...' : '🔗 Connect & Import All Tables'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bg-green-500/10 border-2 border-green-500/30 rounded-2xl p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <span className="text-3xl">✅</span>
-                      <div>
-                        <h3 className="text-xl font-bold text-green-400">Connected to SQLite</h3>
-                        <p className="text-slate-300">{sqliteConfig.filePath}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleDisconnect}
-                        className={`${isFromSavedConnection ? 'w-full' : 'flex-1'} px-6 py-3 bg-slate-800 hover:bg-slate-600 rounded-lg text-white font-bold transition-colors`}
-                      >
-                        🔌 Disconnect
-                      </button>
-                      {!isFromSavedConnection && (
-                        <button
-                          onClick={handleSaveConnection}
-                          className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 rounded-lg text-white font-bold transition-all"
-                        >
-                          💾 Save Connection
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PostgreSQL Tab */}
-            {activeTab === 'postgresql' && (
-              <div className="space-y-4">
-                {/* Saved Connections */}
-                {savedConnections.filter(c => c.type === 'postgresql').length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-bold text-orange-500 mb-3 font-mono">💾 SAVED CONNECTIONS</h3>
-                    <div className="space-y-2">
-                      {savedConnections.filter(c => c.type === 'postgresql').map((conn) => (
-                        <div key={conn.id} className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-slate-600">
-                          <button
-                            onClick={() => loadSavedConnection(conn)}
-                            className="flex-1 text-left text-white hover:text-orange-500 transition-colors"
-                          >
-                            🐘 {conn.name}
-                          </button>
-                          <button
-                            onClick={() => deleteConnection(conn.id)}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-white text-sm transition-colors"
-                          >
-                            🗑️ Delete
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {!isConnected || connectionType !== 'postgresql' ? (
-                  <div className="bg-slate-900/50 rounded-2xl p-6 border border-orange-600/20">
-                    <h3 className="text-lg font-bold text-orange-500 mb-4 font-mono">🐘 PostgreSQL Connection</h3>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Host</label>
-                        <input
-                          type="text"
-                          value={postgresConfig.host}
-                          onChange={(e) => setPostgresConfig({...postgresConfig, host: e.target.value})}
-                          placeholder="localhost"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Port</label>
-                        <input
-                          type="text"
-                          value={postgresConfig.port}
-                          onChange={(e) => setPostgresConfig({...postgresConfig, port: e.target.value})}
-                          placeholder="5432"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Username</label>
-                        <input
-                          type="text"
-                          value={postgresConfig.user}
-                          onChange={(e) => setPostgresConfig({...postgresConfig, user: e.target.value})}
-                          placeholder="postgres"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Password</label>
-                        <input
-                          type="password"
-                          value={postgresConfig.password}
-                          onChange={(e) => setPostgresConfig({...postgresConfig, password: e.target.value})}
-                          placeholder="••••••••"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Database</label>
-                        <input
-                          type="text"
-                          value={postgresConfig.database}
-                          onChange={(e) => setPostgresConfig({...postgresConfig, database: e.target.value})}
-                          placeholder="my_database"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 text-sm mb-2">Table (Optional)</label>
-                        <input
-                          type="text"
-                          value={postgresConfig.table}
-                          onChange={(e) => setPostgresConfig({...postgresConfig, table: e.target.value})}
-                          placeholder="Leave blank for all tables"
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleDatabaseConnect('postgresql')}
-                      disabled={isUploading || !postgresConfig.user || !postgresConfig.database}
-                      className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all"
-                    >
-                      {isUploading ? '⏳ Connecting...' : '🔗 Connect & Import All Tables'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bg-green-500/10 border-2 border-green-500/30 rounded-2xl p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <span className="text-3xl">✅</span>
-                      <div>
-                        <h3 className="text-xl font-bold text-green-400">Connected to PostgreSQL</h3>
-                        <p className="text-slate-300">{postgresConfig.database}@{postgresConfig.host}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleDisconnect}
-                        className={`${isFromSavedConnection ? 'w-full' : 'flex-1'} px-6 py-3 bg-slate-800 hover:bg-slate-600 rounded-lg text-white font-bold transition-colors`}
-                      >
-                        🔌 Disconnect
-                      </button>
-                      {!isFromSavedConnection && (
-                        <button
-                          onClick={handleSaveConnection}
-                          className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 rounded-lg text-white font-bold transition-all"
-                        >
-                          💾 Save Connection
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Supabase Tab */}
-            {activeTab === 'supabase' && (
-              <div className="space-y-4">
-                {/* Saved Connections */}
-                {savedConnections.filter(c => c.type === 'supabase').length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-bold text-orange-500 mb-3 font-mono">💾 SAVED CONNECTIONS</h3>
-                    <div className="space-y-2">
-                      {savedConnections.filter(c => c.type === 'supabase').map((conn) => (
-                        <div key={conn.id} className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-slate-600">
-                          <button
-                            onClick={() => loadSavedConnection(conn)}
-                            className="flex-1 text-left text-white hover:text-orange-500 transition-colors"
-                          >
-                            ⚡ {conn.name}
-                          </button>
-                          <button
-                            onClick={() => deleteConnection(conn.id)}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-white text-sm transition-colors"
-                          >
-                            🗑️ Delete
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {!isConnected || connectionType !== 'supabase' ? (
-                  <div className="bg-slate-900/50 rounded-2xl p-6 border border-orange-600/20">
-                    <h3 className="text-lg font-bold text-orange-500 mb-4 font-mono">⚡ Supabase Connection</h3>
-
-                    <div className="mb-4 p-4 bg-slate-950/60 border border-slate-700 rounded-lg text-sm text-slate-400 leading-relaxed">
-                      In your Supabase dashboard go to{' '}
-                      <span className="text-orange-500">Project Settings → Database → Connection string</span>, copy the{' '}
-                      <span className="text-orange-500">URI</span>, and replace{' '}
-                      <code className="text-orange-400">[YOUR-PASSWORD]</code> with your database password.
-                      <br />
-                      <span className="text-slate-500">
-                        Tip: prefer the connection pooler URI — direct connections are IPv6-only on the free tier.
-                      </span>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 text-sm mb-2">Connection String</label>
-                      <textarea
-                        value={supabaseConfig.connectionString}
-                        onChange={(e) => setSupabaseConfig({...supabaseConfig, connectionString: e.target.value})}
-                        placeholder="postgresql://postgres.abcdefgh:YOUR-PASSWORD@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
-                        rows={3}
-                        spellCheck={false}
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-600 font-mono text-xs focus:outline-none focus:border-orange-500 resize-none"
-                      />
-                    </div>
-
-                    <div className="mt-4">
-                      <label className="block text-slate-300 text-sm mb-2">Table (Optional)</label>
-                      <input
-                        type="text"
-                        value={supabaseConfig.table}
-                        onChange={(e) => setSupabaseConfig({...supabaseConfig, table: e.target.value})}
-                        placeholder="Leave blank for all tables"
-                        className="w-full px-4 py-2 bg-slate-950 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => handleDatabaseConnect('supabase')}
-                      disabled={isUploading || !supabaseConfig.connectionString.trim()}
-                      className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all"
-                    >
-                      {isUploading ? '⏳ Connecting...' : '🔗 Connect & Import All Tables'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bg-green-500/10 border-2 border-green-500/30 rounded-2xl p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <span className="text-3xl">✅</span>
-                      <div>
-                        <h3 className="text-xl font-bold text-green-400">Connected to Supabase</h3>
-                        <p className="text-slate-300">{connectionLabel('supabase', supabaseConfig)}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleDisconnect}
-                        className={`${isFromSavedConnection ? 'w-full' : 'flex-1'} px-6 py-3 bg-slate-800 hover:bg-slate-600 rounded-lg text-white font-bold transition-colors`}
-                      >
-                        🔌 Disconnect
-                      </button>
-                      {!isFromSavedConnection && (
-                        <button
-                          onClick={handleSaveConnection}
-                          className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 rounded-lg text-white font-bold transition-all"
-                        >
-                          💾 Save Connection
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Buttons */}
-            <div className="flex gap-4 mt-8">
-              <button
-                onClick={onClose}
-                className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-600 rounded-lg text-white font-mono transition-colors"
-              >
-                Cancel
-              </button>
-              {isFileSource(activeTab) && visibleFiles.length > 0 && (
-                !isConnected || connectionType !== activeTab ? (
-                  <button
-                    onClick={() => handleConnectFile(activeTab as FileSourceType)}
-                    disabled={!selectedFile || isUploading}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-purple-600 hover:from-orange-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-mono transition-all"
-                  >
-                    {isUploading ? '⏳ Connecting...' : '🔗 Connect to Dataset'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleDisconnectFile}
-                    className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-600 rounded-lg text-white font-bold transition-colors"
-                  >
-                    🔌 Disconnect
-                  </button>
-                )
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                if (isLocked) onUpgrade?.();
+                else if (!isDisabled) setActiveTab(tab.id);
+              }}
+              disabled={isDisabled && !isLocked}
+              title={isLocked ? `Upgrade to unlock ${tab.label}` : undefined}
+              className={cx(
+                'relative flex shrink-0 items-center gap-1.5 -mb-px border-b pb-2.5 pt-3 text-sm transition-colors duration-1 ease-out',
+                activeTab === tab.id
+                  ? 'border-accent text-ink'
+                  : isLocked
+                  ? 'border-transparent text-faint hover:text-muted'
+                  : isDisabled
+                  ? 'cursor-not-allowed border-transparent text-faint opacity-45'
+                  : 'border-transparent text-faint hover:text-muted'
               )}
+            >
+              <Icon size={13} />
+              {tab.label}
+              {isLocked && <IconLock size={11} className="text-faint" />}
+              {isActiveConnection && <StatusDot state="connected" className="ml-0.5" />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Body */}
+      <div className="mx-auto min-h-0 w-full max-w-[720px] flex-1 overflow-y-auto px-6 py-6">
+        {uploadProgress && (
+          <div className="mb-5">
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface3">
+              <div
+                className={cx(
+                  'h-full transition-all duration-300',
+                  uploadProgress.stage === 'error' ? 'bg-negative' : 'bg-accent'
+                )}
+                style={{ width: `${uploadProgress.progress}%` }}
+              />
             </div>
-          </motion.div>
-        </motion.div>
+            <p className={cx('mt-1.5 text-sm', uploadProgress.stage === 'error' ? 'text-negative' : 'text-muted')}>
+              {uploadProgress.message}
+            </p>
+            {uploadProgress.stage === 'error' && uploadProgress.message.includes('Upgrade') && onUpgrade && (
+              <button
+                type="button"
+                onClick={onUpgrade}
+                className="mt-1 text-sm text-accent transition-colors duration-1 hover:text-accent-hi"
+              >
+                View plans →
+              </button>
+            )}
+          </div>
+        )}
+
+        {isFileSource(activeTab) && (
+          <FileSourcePanel
+            copy={FILE_TAB_COPY[activeTab as FileSourceType]}
+            files={visibleFiles}
+            selectedFile={selectedFile}
+            onSelect={setSelectedFile}
+            onDelete={handleDeleteCSV}
+            onUpload={handleUpload}
+            uploading={isUploading}
+            formatFileSize={formatFileSize}
+          />
+        )}
+
+        {!isFileSource(activeTab) && (
+          <DatabasePanel
+            type={activeTab as DatabaseSourceType}
+            config={CONFIG_FOR[activeTab as DatabaseSourceType].config}
+            setConfig={CONFIG_FOR[activeTab as DatabaseSourceType].setConfig}
+            connected={isConnected && connectionType === activeTab}
+            connectionLabel={connectionLabel}
+            savedConnections={savedConnections.filter((c) => c.type === activeTab)}
+            onLoadSaved={loadSavedConnection}
+            onDeleteSaved={deleteConnection}
+            fromSaved={isFromSavedConnection}
+            uploading={isUploading}
+            onConnect={() => handleDatabaseConnect(activeTab as DatabaseSourceType)}
+            onDisconnect={handleDisconnect}
+            onSaveConnection={handleSaveConnection}
+          />
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center gap-3 border-t border-line-subtle px-6 py-3">
+        <span className="flex-1" />
+        <Button onClick={onClose}>Cancel</Button>
+        {isFileSource(activeTab) && visibleFiles.length > 0 && (
+          !isConnected || connectionType !== activeTab ? (
+            <Button
+              variant="primary"
+              onClick={() => handleConnectFile(activeTab as FileSourceType)}
+              disabled={!selectedFile || isUploading}
+              loading={isUploading}
+            >
+              <IconPlug size={12} />
+              Connect to dataset
+            </Button>
+          ) : (
+            <Button onClick={handleDisconnectFile}>
+              <IconClose size={12} />
+              Disconnect
+            </Button>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   File source panel — shared by CSV, Excel and JSON
+   ============================================================ */
+
+function FileSourcePanel({
+  copy,
+  files,
+  selectedFile,
+  onSelect,
+  onDelete,
+  onUpload,
+  uploading,
+  formatFileSize,
+}: {
+  copy: { title: string; blurb: string; noun: string };
+  files: CSVFile[];
+  selectedFile: string;
+  onSelect: (name: string) => void;
+  onDelete: (name: string) => void;
+  onUpload: () => void;
+  uploading: boolean;
+  formatFileSize: (bytes: number) => string;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-dashed border-line px-8 py-10 text-center">
+        <IconFile size={28} className="mx-auto text-faint" />
+        <h3 className="mt-3 text-base font-medium text-ink">{copy.title}</h3>
+        <p className="mt-1 text-sm text-muted">{copy.blurb}</p>
+        <Button variant="primary" className="mt-5" onClick={onUpload} disabled={uploading} loading={uploading}>
+          Browse & upload
+        </Button>
+      </div>
+
+      <div>
+        <h3 className="eyebrow mb-2">Available datasets</h3>
+        {files.length === 0 ? (
+          <EmptyState
+            title={`No ${copy.noun} datasets yet`}
+            body="Upload your first dataset to get started."
+          />
+        ) : (
+          <div className="space-y-2">
+            {files.map((file) => (
+              <button
+                key={file.name}
+                type="button"
+                onClick={() => onSelect(file.name)}
+                className={cx(
+                  'flex w-full items-center gap-3 rounded-lg border px-3.5 py-2.5 text-left transition-colors duration-1 ease-out',
+                  selectedFile === file.name
+                    ? 'border-accent-line bg-accent-soft'
+                    : 'border-line-subtle hover:border-line'
+                )}
+              >
+                <span
+                  className={cx(
+                    'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                    selectedFile === file.name ? 'border-accent bg-accent' : 'border-line'
+                  )}
+                >
+                  {selectedFile === file.name && <IconCheck size={10} className="text-accent-ink" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-base text-ink">{file.name}</span>
+                  <span className="block text-xs text-faint">{formatFileSize(file.size)}</span>
+                </span>
+                <IconButton
+                  label="Delete"
+                  tone="danger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(file.name);
+                  }}
+                >
+                  <IconTrash size={13} />
+                </IconButton>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Database panel — shared by MySQL, PostgreSQL, SQLite, Supabase
+   ============================================================ */
+
+function DatabasePanel({
+  type,
+  config,
+  setConfig,
+  connected,
+  connectionLabel,
+  savedConnections,
+  onLoadSaved,
+  onDeleteSaved,
+  fromSaved,
+  uploading,
+  onConnect,
+  onDisconnect,
+  onSaveConnection,
+}: {
+  type: DatabaseSourceType;
+  config: any;
+  setConfig: (c: any) => void;
+  connected: boolean;
+  connectionLabel: (type: DatabaseSourceType, config: any) => string;
+  savedConnections: SavedConnection[];
+  onLoadSaved: (conn: SavedConnection) => void;
+  onDeleteSaved: (id: string) => void;
+  fromSaved: boolean;
+  uploading: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onSaveConnection: () => void;
+}) {
+  if (connected) {
+    return (
+      <div className="rounded-xl border border-accent-line bg-accent-soft p-5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent">
+            <IconCheck size={14} className="text-accent-ink" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base font-medium text-ink">Connected to {DB_LABEL[type]}</h3>
+            <p className="truncate text-sm text-muted">{connectionLabel(type, config)}</p>
+          </div>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <Button className={fromSaved ? 'w-full' : 'flex-1'} onClick={onDisconnect}>
+            Disconnect
+          </Button>
+          {!fromSaved && (
+            <Button variant="primary" className="flex-1" onClick={onSaveConnection}>
+              Save connection
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {savedConnections.length > 0 && (
+        <div>
+          <h3 className="eyebrow mb-2">Saved connections</h3>
+          <div className="space-y-1.5">
+            {savedConnections.map((conn) => (
+              <div
+                key={conn.id}
+                className="flex items-center gap-2 rounded-lg border border-line-subtle px-3 py-2"
+              >
+                <button
+                  type="button"
+                  onClick={() => onLoadSaved(conn)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left text-base text-ink transition-colors duration-1 hover:text-accent"
+                >
+                  <IconData size={13} className="shrink-0 text-faint" />
+                  <span className="truncate">{conn.name}</span>
+                </button>
+                <IconButton label="Delete" tone="danger" onClick={() => onDeleteSaved(conn.id)}>
+                  <IconTrash size={13} />
+                </IconButton>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
-    </AnimatePresence>
+
+      <div>
+        <h3 className="mb-3 text-base font-medium text-ink">{DB_LABEL[type]} connection</h3>
+
+        {type === 'supabase' ? (
+          <div className="space-y-4">
+            <p className="rounded-lg border border-line-subtle bg-surface2 px-3.5 py-2.5 text-sm leading-relaxed text-muted">
+              In your Supabase dashboard go to{' '}
+              <span className="text-ink">Project Settings → Database → Connection string</span>, copy the{' '}
+              <span className="text-ink">URI</span>, and replace{' '}
+              <code className="text-accent">[YOUR-PASSWORD]</code> with your database password.
+              <br />
+              <span className="text-faint">
+                Tip: prefer the connection pooler URI — direct connections are IPv6-only on the free tier.
+              </span>
+            </p>
+
+            <Field label="Connection string">
+              <textarea
+                value={config.connectionString}
+                onChange={(e) => setConfig({ ...config, connectionString: e.target.value })}
+                placeholder="postgresql://postgres.abcdefgh:YOUR-PASSWORD@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
+                rows={3}
+                spellCheck={false}
+                className="w-full resize-none rounded-lg border border-line bg-bg px-2.5 py-2 font-mono text-xs text-ink placeholder:text-faint transition-colors duration-1 ease-out hover:border-[#3A3B3B] focus:border-accent-line focus:outline-none"
+              />
+            </Field>
+
+            <Field label="Table" optional>
+              <Input
+                value={config.table}
+                onChange={(e) => setConfig({ ...config, table: e.target.value })}
+                placeholder="Leave blank for all tables"
+              />
+            </Field>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3.5">
+            {(DB_FIELDS[type] ?? []).map((f) => (
+              <div key={f.key} className={f.span === 2 ? 'col-span-2' : undefined}>
+                <Field label={f.label} optional={f.optional}>
+                  <Input
+                    type={f.type ?? 'text'}
+                    value={config[f.key]}
+                    onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
+                    placeholder={f.placeholder}
+                  />
+                </Field>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <Button
+          variant="primary"
+          className="mt-5 w-full"
+          onClick={onConnect}
+          disabled={uploading || !isDbConfigComplete(type, config)}
+          loading={uploading}
+        >
+          <IconPlug size={12} />
+          Connect & import all tables
+        </Button>
+      </div>
+    </div>
   );
 }

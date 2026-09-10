@@ -28,6 +28,7 @@ export RAZORPAY_WEBHOOK_SECRET="${RAZORPAY_WEBHOOK_SECRET:-}"
 export USER_POOL_NAME="${PROJECT}-users"
 export TABLE_SUBSCRIPTIONS="${PROJECT}-subscriptions"
 export TABLE_PAYMENTS="${PROJECT}-payments"
+export TABLE_USAGE="${PROJECT}-usage"
 export LAMBDA_ROLE_NAME="${PROJECT}-lambda-exec"
 export API_NAME="${PROJECT}-api"
 

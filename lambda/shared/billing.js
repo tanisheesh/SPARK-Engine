@@ -22,4 +22,17 @@ function isExpired(currentPeriodEnd) {
   return !currentPeriodEnd || Date.now() > new Date(currentPeriodEnd).getTime();
 }
 
-module.exports = { addCycle, isExpired };
+/* Single place that turns a subscriptions row into "what tier is this user
+   actually on right now" — used by billing-status (to report it) and
+   usage-consume (to know which quota applies). A user with no row, an
+   inactive row, or an expired row is FREE. */
+async function getActiveTier(client, TABLES, GetCommand, userId) {
+  const result = await client.send(
+    new GetCommand({ TableName: TABLES.subscriptions, Key: { user_id: userId } })
+  );
+  const sub = result.Item;
+  if (!sub || sub.status !== 'active' || isExpired(sub.current_period_end)) return 'FREE';
+  return sub.tier;
+}
+
+module.exports = { addCycle, isExpired, getActiveTier };

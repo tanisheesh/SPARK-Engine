@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getSession, signOut, type SparkUser } from '../../lib/auth';
-import { fetchBillingStatus } from '../../lib/api';
+import { consumeQuery, fetchBillingStatus } from '../../lib/api';
 import type { Tier } from '../../lib/api';
 
 import SettingsModal from '../../components/SettingsModal';
@@ -10,7 +10,10 @@ import FileUpload from '../../components/FileUpload';
 import VisualizationView from '../../components/VisualizationView';
 import LoginScreen from '../../components/LoginScreen';
 import { PricingScreen } from '../../components/PricingScreen';
+import { LegalView } from '../../components/LegalView';
+import type { LegalDoc } from '../../components/legal/TermsBody';
 import { isFileSource, type DataSourceType } from '../../lib/data-sources';
+import { quotaFor } from '../../lib/spark/quotas';
 
 import { Sidebar, type NavKey } from '../../components/shell/Sidebar';
 import { QueryComposer } from '../../components/ask/QueryComposer';
@@ -51,6 +54,12 @@ const NAV_TITLE: Record<NavKey, string> = {
   explore: 'Explore',
   data: 'Schema',
   conversations: 'Conversations',
+};
+
+const LEGAL_TITLES: Record<LegalDoc, string> = {
+  terms: 'Terms of Service',
+  privacy: 'Privacy Policy',
+  refund: 'Refund & Cancellation',
 };
 
 /* ============================================================
@@ -141,6 +150,40 @@ export default function Home() {
   const [connectionConfig, setConnectionConfig] = useState<Record<string, unknown> | null>(null);
   const [showFileUpload, setShowFileUpload] = useState(false);
 
+  /* ---------- legal docs ---------- */
+  const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
+
+  // Data sources, Pricing, Settings and Legal docs all render inline in the
+  // main column (sidebar + studio stay visible), so only one can be open at
+  // a time — opening one closes the others rather than stacking.
+  const openFileUpload = useCallback(() => {
+    setShowPricing(false);
+    setShowSettings(false);
+    setLegalDoc(null);
+    setShowFileUpload(true);
+  }, []);
+
+  const openPricing = useCallback(() => {
+    setShowFileUpload(false);
+    setShowSettings(false);
+    setLegalDoc(null);
+    setShowPricing(true);
+  }, []);
+
+  const openSettings = useCallback(() => {
+    setShowFileUpload(false);
+    setShowPricing(false);
+    setLegalDoc(null);
+    setShowSettings(true);
+  }, []);
+
+  const openLegal = useCallback((doc: LegalDoc) => {
+    setShowFileUpload(false);
+    setShowPricing(false);
+    setShowSettings(false);
+    setLegalDoc(doc);
+  }, []);
+
   /* ---------- navigation ---------- */
   const [nav, setNav] = useState<NavKey>('ask');
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -185,8 +228,12 @@ export default function Home() {
 
   const connected = !!currentDataset && !!datasetType;
   const connState: ConnState = connected ? 'connected' : 'disconnected';
-  const micEnabled = !!apiSettings.deepgramApiKey;
-  const canSpeak = !!apiSettings.deepgramApiKey;
+  const quota = quotaFor(plan);
+  // Voice (both STT and TTS) is an IGNITE-and-up feature. A leftover
+  // Deepgram key from a prior higher tier (or from before a downgrade)
+  // must not re-enable it — the tier check comes first, always.
+  const micEnabled = quota.voice && !!apiSettings.deepgramApiKey;
+  const canSpeak = quota.voice && !!apiSettings.deepgramApiKey;
   const settingsConfigured = !!apiSettings.groqApiKey;
 
   const activeConversation = useMemo(
@@ -245,14 +292,14 @@ export default function Home() {
         if (window.electronAPI) {
           const s = await window.electronAPI.getSettings();
           setApiSettings(s ?? {});
-          if (!s?.groqApiKey) setTimeout(() => setShowSettings(true), 800);
+          if (!s?.groqApiKey) setTimeout(() => openSettings(), 800);
         }
       } catch (e) {
         console.error('Failed to load settings', e);
       }
     })();
 
-    window.electronAPI?.onOpenSettings(() => setShowSettings(true));
+    window.electronAPI?.onOpenSettings(() => openSettings());
 
     getSession().then((session) => {
       setUser(session?.user ?? null);
@@ -387,11 +434,11 @@ export default function Home() {
     async (text: string) => {
       if (!canSpeak) {
         toast('Add your Deepgram key in Settings to hear answers.', 'error');
-        setShowSettings(true);
+        openSettings();
         return;
       }
       try {
-        const res = await window.electronAPI!.generateTTS({ text, settings: apiSettings });
+        const res = await window.electronAPI!.generateTTS({ text, settings: apiSettings, voiceAllowed: canSpeak });
         if (res?.success && res.audioData) playAudio(res.audioData, res.mimeType);
         else toast(res?.error ?? 'Voice output failed.', 'error');
       } catch (e) {
@@ -443,7 +490,7 @@ export default function Home() {
   const startListening = useCallback(async () => {
     if (!micEnabled) {
       toast('Add a Deepgram key in Settings to ask by voice.', 'error');
-      setShowSettings(true);
+      openSettings();
       return;
     }
     if (wsRef.current) return;
@@ -527,13 +574,33 @@ export default function Home() {
 
       if (!apiSettings.groqApiKey) {
         toast('Add your Groq API key to start asking.', 'error');
-        setShowSettings(true);
+        openSettings();
         return;
       }
       if (!connected) {
         toast('Connect a data source first.', 'error');
-        setShowFileUpload(true);
+        openFileUpload();
         return;
+      }
+
+      // Enforced server-side (lambda/usage-consume) against the tier's
+      // TIERS.txt quota — never trust a client-side counter for this.
+      try {
+        const usage = await consumeQuery();
+        if (!usage.allowed) {
+          const limit = usage.reason === 'monthly' ? usage.limitMonth : usage.limitDay;
+          const period = usage.reason === 'monthly' ? 'this month' : 'today';
+          toast(
+            `You've used all ${limit} queries ${period} on the ${usage.tier} plan. Upgrade for more.`,
+            'error'
+          );
+          openPricing();
+          return;
+        }
+      } catch (e) {
+        // Signed out, offline, or the API is unreachable — fail open rather
+        // than block every question on a billing-service hiccup.
+        console.error('Usage check failed, continuing without it', e);
       }
 
       setNav('ask');
@@ -573,6 +640,7 @@ export default function Home() {
           question: text,
           csvFile: path,
           settings: apiSettings,
+          voiceAllowed: canSpeak,
         });
 
         if (cancelledRef.current.has(turnId)) {
@@ -596,7 +664,11 @@ export default function Home() {
           ),
         }));
 
-        if (result.tts?.hasAudio && result.tts.audioData) {
+        // canSpeak already folds in quota.voice — the main process only knows
+        // about the Deepgram key, not the subscription tier, so the tier check
+        // has to happen here before any auto-play, not just on the manual
+        // "speak" button.
+        if (canSpeak && result.tts?.hasAudio && result.tts.audioData) {
           playAudio(result.tts.audioData, result.tts.mimeType);
         }
       } catch (err) {
@@ -624,6 +696,7 @@ export default function Home() {
     [
       apiSettings,
       busy,
+      canSpeak,
       connected,
       currentDataset,
       datasetType,
@@ -651,6 +724,20 @@ export default function Home() {
   }, [patchTurn]);
 
   /* ============================================================
+     Navigation — Data sources and Pricing render inline in place of the
+     normal nav content (not as overlays), so switching to any regular
+     nav tab needs to close whichever of those is currently open.
+     ============================================================ */
+
+  const navigateTo = useCallback((key: NavKey) => {
+    setShowFileUpload(false);
+    setShowPricing(false);
+    setShowSettings(false);
+    setLegalDoc(null);
+    setNav(key);
+  }, []);
+
+  /* ============================================================
      Studio
      ============================================================ */
 
@@ -661,7 +748,7 @@ export default function Home() {
         return;
       }
       if (action.backing === 'view') {
-        setNav('data');
+        navigateTo('data');
         return;
       }
       if (action.backing === 'local') {
@@ -679,7 +766,7 @@ export default function Home() {
         );
       }
     },
-    [currentDataset, datasetType, lastDoneTurn, runQuestion, toast]
+    [currentDataset, datasetType, lastDoneTurn, navigateTo, runQuestion, toast]
   );
 
   /* ============================================================
@@ -689,7 +776,7 @@ export default function Home() {
   const newConversation = () => {
     setActiveId(null);
     setQuestion('');
-    setNav('ask');
+    navigateTo('ask');
     setTimeout(() => composerRef.current?.focus(), 60);
   };
 
@@ -753,7 +840,7 @@ export default function Home() {
       }
       if (mod && e.key === '/') {
         e.preventDefault();
-        setNav('ask');
+        navigateTo('ask');
         composerRef.current?.focus();
         return;
       }
@@ -795,7 +882,7 @@ export default function Home() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [busy, isListening, isSpeaking, micEnabled, startListening, stopListening, stopAudio, cancelRun]);
+  }, [busy, isListening, isSpeaking, micEnabled, navigateTo, startListening, stopListening, stopAudio, cancelRun]);
 
   /* ============================================================
      Render
@@ -829,14 +916,15 @@ export default function Home() {
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
       <Sidebar
         active={nav}
-        onNavigate={setNav}
+        onNavigate={navigateTo}
         datasetName={currentDataset}
         sourceType={datasetType}
         connState={connState}
-        onManageData={() => setShowFileUpload(true)}
-        onOpenSchema={() => setNav('data')}
-        onOpenSettings={() => setShowSettings(true)}
+        onManageData={() => openFileUpload()}
+        onOpenSchema={() => navigateTo('data')}
+        onOpenSettings={() => openSettings()}
         settingsConfigured={settingsConfigured}
+        onNewConversation={newConversation}
         conversationCount={conversations.length}
         userEmail={user.email ?? undefined}
         userAvatar={user.avatarUrl}
@@ -846,24 +934,78 @@ export default function Home() {
           setPlan(null);
         }}
         plan={plan}
-        onOpenPricing={() => setShowPricing(true)}
+        onOpenPricing={() => openPricing()}
       />
 
       {/* ---------- main column ---------- */}
       <main className="flex min-w-0 flex-1 flex-col">
         <Topbar
-          title={NAV_TITLE[nav]}
+          title={
+            showFileUpload
+              ? 'Data sources'
+              : showPricing
+              ? 'Pricing'
+              : showSettings
+              ? 'Settings'
+              : legalDoc
+              ? LEGAL_TITLES[legalDoc]
+              : NAV_TITLE[nav]
+          }
           subtitle={
-            nav === 'ask'
+            showFileUpload || showPricing || legalDoc
+              ? undefined
+              : showSettings
+              ? 'Keys are stored locally on this machine.'
+              : nav === 'ask'
               ? activeConversation?.title
               : nav === 'data' && connected
                 ? currentDataset
                 : undefined
           }
           onOpenPalette={() => setPaletteOpen(true)}
-          onNewConversation={nav === 'ask' ? newConversation : undefined}
+          onClose={
+            showFileUpload
+              ? () => setShowFileUpload(false)
+              : showPricing
+              ? () => setShowPricing(false)
+              : showSettings
+              ? () => setShowSettings(false)
+              : legalDoc
+              ? () => setLegalDoc(null)
+              : undefined
+          }
         />
 
+        {showFileUpload ? (
+          <FileUpload
+            isOpen={showFileUpload}
+            onClose={() => setShowFileUpload(false)}
+            onFileSelected={handleFileSelected}
+            currentDatasetType={datasetType}
+            plan={plan}
+            onUpgrade={() => {
+              setShowFileUpload(false);
+              openPricing();
+            }}
+          />
+        ) : showPricing ? (
+          <PricingScreen open={showPricing} user={user} toast={toast} />
+        ) : showSettings ? (
+          <SettingsModal
+            isOpen={showSettings}
+            onClose={() => setShowSettings(false)}
+            onSave={(s: ApiSettings) => setApiSettings(s)}
+            plan={plan}
+            onUpgrade={() => {
+              setShowSettings(false);
+              openPricing();
+            }}
+            onOpenLegal={openLegal}
+          />
+        ) : legalDoc ? (
+          <LegalView doc={legalDoc} onOpenDoc={openLegal} />
+        ) : (
+          <>
         {nav === 'ask' && (
           <>
             <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
@@ -871,7 +1013,7 @@ export default function Home() {
                 <AskHome
                   connected={connected}
                   datasetName={currentDataset}
-                  onConnect={() => setShowFileUpload(true)}
+                  onConnect={() => openFileUpload()}
                   onAsk={(q) => runQuestion(q)}
                   onSurprise={() => runStudioAction(ACTION_BY_ID.surprise)}
                   recents={recents}
@@ -889,8 +1031,8 @@ export default function Home() {
                         setQuestion(q);
                         composerRef.current?.focus();
                       }}
-                      onOpenSettings={() => setShowSettings(true)}
-                      onConnect={() => setShowFileUpload(true)}
+                      onOpenSettings={() => openSettings()}
+                      onConnect={() => openFileUpload()}
                       onSpeak={speak}
                       canSpeak={canSpeak}
                     />
@@ -928,7 +1070,7 @@ export default function Home() {
               datasetName={currentDataset}
               busy={busy}
               onRun={runStudioAction}
-              onConnect={() => setShowFileUpload(true)}
+              onConnect={() => openFileUpload()}
             />
           </div>
         )}
@@ -940,7 +1082,7 @@ export default function Home() {
                 {connected ? 'Tables and relationships' : 'No source connected'}
               </span>
               <span className="flex-1" />
-              <Button size="sm" onClick={() => setShowFileUpload(true)}>
+              <Button size="sm" onClick={() => openFileUpload()}>
                 <IconPlug size={12} />
                 Manage sources
               </Button>
@@ -979,6 +1121,8 @@ export default function Home() {
             />
           </div>
         )}
+          </>
+        )}
       </main>
 
       {/* ---------- studio ---------- */}
@@ -988,10 +1132,10 @@ export default function Home() {
         busy={busy}
         runningAction={runningAction}
         onRun={runStudioAction}
-        onConnect={() => setShowFileUpload(true)}
+        onConnect={() => openFileUpload()}
         conversation={activeConversation}
         onJumpToTurn={(id) => {
-          setNav('ask');
+          navigateTo('ask');
           document.getElementById(`turn-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }}
       />
@@ -1002,43 +1146,23 @@ export default function Home() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
-        onNavigate={setNav}
+        onNavigate={navigateTo}
         onNewConversation={newConversation}
         onOpenConversation={(id) => {
           setActiveId(id);
-          setNav('ask');
+          navigateTo('ask');
         }}
-        onConnect={() => setShowFileUpload(true)}
-        onOpenSettings={() => setShowSettings(true)}
+        onConnect={() => openFileUpload()}
+        onOpenSettings={() => openSettings()}
         onRunStudio={runStudioAction}
         conversations={conversations}
         turn={lastDoneTurn}
         connected={connected}
       />
 
-      <SettingsModal
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        onSave={(s: ApiSettings) => setApiSettings(s)}
-      />
-
-      <FileUpload
-        isOpen={showFileUpload}
-        onClose={() => setShowFileUpload(false)}
-        onFileSelected={handleFileSelected}
-        currentDatasetType={datasetType}
-      />
-
       <ToastStack
         toasts={toasts}
         onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))}
-      />
-
-      <PricingScreen
-        open={showPricing}
-        onClose={() => setShowPricing(false)}
-        user={user}
-        toast={toast}
       />
     </div>
   );

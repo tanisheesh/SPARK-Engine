@@ -30,7 +30,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
       return (
         <div className="flex h-screen w-screen items-center justify-center bg-bg px-6">
           <div className="w-full max-w-[420px]">
-            <h1 className="text-xl font-semibold text-ink">SPARK stopped unexpectedly.</h1>
+            <h1 className="text-xl font-semibold text-ink">SPARK Engine stopped unexpectedly.</h1>
             <p className="mt-2 text-prose text-muted">
               Your data and settings are untouched. Reloading usually clears it.
             </p>
@@ -43,7 +43,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
               onClick={() => window.location.reload()}
               className="mt-4 inline-flex h-8 items-center rounded-md border border-accent-lo bg-accent px-3.5 text-base font-medium text-accent-ink transition-colors duration-1 ease-out hover:bg-accent-hi"
             >
-              Reload SPARK
+              Reload SPARK Engine
             </button>
           </div>
         </div>

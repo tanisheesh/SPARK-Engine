@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Zips the whole lambda/ folder ONCE (so every function's `require('../shared/...')`
-# resolves without any path rewriting) and deploys all 4 billing functions
-# from that one zip, each pointed at its own `<dir>/index.handler`. No npm
+# resolves without any path rewriting) and deploys all 5 functions from
+# that one zip, each pointed at its own `<dir>/index.handler`. No npm
 # install and no node_modules — @aws-sdk/client-dynamodb and
 # @aws-sdk/lib-dynamodb ship built into the Node.js 20 Lambda runtime already.
 set -euo pipefail
@@ -49,7 +49,10 @@ fi
 # chokes on empty values (RAZORPAY_KEY_ID etc. are blank until real keys are added).
 ENV_DIR=$(mktemp -d)
 cat > "$ENV_DIR/billing.json" <<EOF
-{"Variables":{"SUBSCRIPTIONS_TABLE":"${TABLE_SUBSCRIPTIONS}","PAYMENTS_TABLE":"${TABLE_PAYMENTS}","RAZORPAY_KEY_ID":"${RAZORPAY_KEY_ID}","RAZORPAY_KEY_SECRET":"${RAZORPAY_KEY_SECRET}","RAZORPAY_WEBHOOK_SECRET":"${RAZORPAY_WEBHOOK_SECRET}"}}
+{"Variables":{"SUBSCRIPTIONS_TABLE":"${TABLE_SUBSCRIPTIONS}","PAYMENTS_TABLE":"${TABLE_PAYMENTS}","USAGE_TABLE":"${TABLE_USAGE}","RAZORPAY_KEY_ID":"${RAZORPAY_KEY_ID}","RAZORPAY_KEY_SECRET":"${RAZORPAY_KEY_SECRET}","RAZORPAY_WEBHOOK_SECRET":"${RAZORPAY_WEBHOOK_SECRET}"}}
+EOF
+cat > "$ENV_DIR/usage.json" <<EOF
+{"Variables":{"SUBSCRIPTIONS_TABLE":"${TABLE_SUBSCRIPTIONS}","USAGE_TABLE":"${TABLE_USAGE}"}}
 EOF
 # Same Windows-path issue as the zip — the AWS CLI's Python process needs a
 # real path, not Git Bash's /tmp/... view of it.
@@ -88,8 +91,9 @@ deploy_function "billing-status"       "billing-status/index.handler"       "$EN
 deploy_function "billing-create-order" "billing-create-order/index.handler" "$ENV_DIR/billing.json"
 deploy_function "billing-verify-payment" "billing-verify-payment/index.handler" "$ENV_DIR/billing.json"
 deploy_function "billing-webhook"      "billing-webhook/index.handler"      "$ENV_DIR/billing.json"
+deploy_function "usage-consume"        "usage-consume/index.handler"        "$ENV_DIR/usage.json"
 
 rm -rf "$ENV_DIR"
 
 echo
-echo "All 4 Lambdas deployed. Next: 05-api-gateway.sh"
+echo "All 5 Lambdas deployed. Next: 05-api-gateway.sh"

@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   
   // File operations (CSV, Excel workbooks and JSON all go through these)
-  uploadCSV: () => ipcRenderer.invoke('upload-csv'),
+  uploadCSV: (maxSizeBytes) => ipcRenderer.invoke('upload-csv', maxSizeBytes),
   listCSVFiles: () => ipcRenderer.invoke('list-csv-files'),
   deleteCSV: (fileName) => ipcRenderer.invoke('delete-csv', fileName),
   importCSVToDuckDB: (data) => ipcRenderer.invoke('import-csv-to-duckdb', data),

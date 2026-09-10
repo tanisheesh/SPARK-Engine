@@ -8,6 +8,12 @@ const LINKS = [
   { label: 'Get SPARK', href: '#cta' },
 ];
 
+const LEGAL_LINKS = [
+  { label: 'Terms of Service', href: './terms/' },
+  { label: 'Privacy Policy', href: './privacy/' },
+  { label: 'Refund & Cancellation', href: './refund/' },
+];
+
 const STACK = ['Electron', 'Next.js', 'DuckDB', 'Groq', 'Deepgram'];
 
 export default function Footer() {
@@ -27,7 +33,9 @@ export default function Footer() {
                 <line x1="2.8" y1="2.8" x2="13.2" y2="13.2" stroke="#A9C08E" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
                 <line x1="13.2" y1="2.8" x2="2.8" y2="13.2" stroke="#A9C08E" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
               </svg>
-              <span className="text-xs font-semibold tracking-tight" style={{ color: '#F5F5F5' }}>SPARK</span>
+              <span className="text-xs font-semibold tracking-tight" style={{ color: '#F5F5F5' }}>
+                SPARK <span style={{ color: '#6A6A6A', fontWeight: 500 }}>Engine</span>
+              </span>
             </div>
             <p className="text-xs leading-relaxed" style={{ color: '#6A6A6A' }}>
               Talk to your data in plain English.
@@ -97,15 +105,31 @@ export default function Footer() {
 
         {/* Bottom bar */}
         <div
-          className="flex flex-col sm:flex-row items-center justify-between pt-6 gap-4"
+          className="flex flex-col gap-4 pt-6"
           style={{ borderTop: '1px solid #2A2A2A' }}
         >
-          <p className="text-xs font-mono" style={{ color: '#6A6A6A' }}>
-            &copy; {new Date().getFullYear()} SPARK Engine. All rights reserved.
-          </p>
-          <p className="text-xs font-mono" style={{ color: '#6A6A6A' }}>
-            Made by Team Binary Beast
-          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-xs font-mono" style={{ color: '#6A6A6A' }}>
+              &copy; {new Date().getFullYear()} SPARK Engine. All rights reserved.
+            </p>
+            <p className="text-xs font-mono" style={{ color: '#6A6A6A' }}>
+              Made by Team Binary Beast
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-center sm:justify-start gap-x-5 gap-y-1.5">
+            {LEGAL_LINKS.map((l) => (
+              <a
+                key={l.label}
+                href={l.href}
+                className="text-xs transition-colors"
+                style={{ color: '#6A6A6A' }}
+                onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#9A9A9A')}
+                onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#6A6A6A')}
+              >
+                {l.label}
+              </a>
+            ))}
+          </div>
         </div>
       </div>
     </footer>

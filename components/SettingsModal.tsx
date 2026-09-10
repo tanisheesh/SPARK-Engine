@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Field, Input, Modal, Spinner } from './ui/Primitives';
-import { IconCheck, IconClose, IconSearch } from './ui/Icons';
+import { Button, Field, Input, Spinner, cx } from './ui/Primitives';
+import { IconCheck, IconClose, IconLock, IconSearch } from './ui/Icons';
+import { quotaFor } from '../lib/spark/quotas';
+import type { Tier } from '../lib/api';
+import type { LegalDoc } from './legal/TermsBody';
 
 type PrivacyLevel = 'standard' | 'strict' | 'local';
 
@@ -25,20 +28,30 @@ const PRIVACY_OPTIONS: { value: PrivacyLevel; label: string; detail: string }[] 
   },
   {
     value: 'local',
-    label: 'Local only',
+    label: 'Offline support',
     detail: 'Nothing leaves this machine — not even your question. Requires a downloaded local model, and answer quality is noticeably lower.',
   },
+];
+
+const LEGAL_DOCS: { label: string; doc: LegalDoc }[] = [
+  { label: 'Terms of Service', doc: 'terms' },
+  { label: 'Privacy Policy', doc: 'privacy' },
+  { label: 'Refund & Cancellation', doc: 'refund' },
 ];
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (settings: Settings) => void;
+  plan: Tier | null;
+  onUpgrade?: () => void;
+  /** Switches the main column to the in-app Terms/Privacy/Refund view. */
+  onOpenLegal?: (doc: LegalDoc) => void;
 }
 
 type TestState = 'success' | 'error' | 'testing';
 
-export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, onSave, plan, onUpgrade, onOpenLegal }: SettingsModalProps) {
   const [settings, setSettings] = useState<Settings>({
     groqApiKey: '',
     deepgramApiKey: '',
@@ -47,6 +60,8 @@ export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModal
 
   const [isLoading, setIsLoading] = useState(false);
   const [testResults, setTestResults] = useState<{ [key: string]: TestState }>({});
+
+  const quota = quotaFor(plan);
 
   useEffect(() => {
     if (isOpen) loadSettings();
@@ -67,8 +82,18 @@ export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModal
     setIsLoading(true);
     try {
       if (window.electronAPI) {
-        await window.electronAPI.saveSettings(settings);
-        onSave(settings);
+        // A downgrade (or a key entered before upgrading, then never
+        // cleared) shouldn't leave a locked feature silently configured.
+        const toSave: Settings = {
+          ...settings,
+          deepgramApiKey: quota.voice ? settings.deepgramApiKey : '',
+          privacy:
+            !quota.offlineSupport && settings.privacy?.level === 'local'
+              ? { level: 'standard' }
+              : settings.privacy,
+        };
+        await window.electronAPI.saveSettings(toSave);
+        onSave(toSave);
         onClose();
       }
     } catch (error) {
@@ -125,87 +150,118 @@ export default function SettingsModal({ isOpen, onClose, onSave }: SettingsModal
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <Modal
-      open={isOpen}
-      onClose={onClose}
-      title="Settings"
-      subtitle="Keys are stored locally on this machine."
-      width={560}
-      footer={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={isLoading} onClick={handleSave}>
-            Save
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-6">
-        <KeySection
-          title="Groq"
-          required
-          note="Interprets your question and writes the SQL. SPARK cannot answer anything without it."
-          docs="https://console.groq.com/keys"
-        >
-          <KeyRow
-            label="API key"
-            value={settings.groqApiKey}
-            placeholder="gsk_…"
-            state={testResults.groq}
-            onChange={(v) => setSettings({ ...settings, groqApiKey: v })}
-            onTest={() => testApiKey('groq', settings.groqApiKey)}
-          />
-        </KeySection>
+    <div className="flex min-h-0 flex-1 flex-col" role="region" aria-label="Settings">
+      <div className="mx-auto min-h-0 w-full max-w-[640px] flex-1 overflow-y-auto px-6 py-6">
+        <div className="space-y-6">
+          <KeySection
+            title="Groq"
+            required={!quota.managedKeys}
+            note="Interprets your question and writes the SQL. SPARK cannot answer anything without it."
+            docs="https://console.groq.com/keys"
+            managed={quota.managedKeys}
+          >
+            <KeyRow
+              label="API key"
+              value={settings.groqApiKey}
+              placeholder="gsk_…"
+              state={testResults.groq}
+              onChange={(v) => setSettings({ ...settings, groqApiKey: v })}
+              onTest={() => testApiKey('groq', settings.groqApiKey)}
+            />
+          </KeySection>
 
-        <KeySection
-          title="Deepgram"
-          note="Voice input and spoken answers. Without it the microphone stays disabled, you type instead, and answers are shown as text only."
-          docs="https://console.deepgram.com"
-        >
-          <KeyRow
-            label="API key"
-            value={settings.deepgramApiKey}
-            state={testResults.deepgram}
-            onChange={(v) => setSettings({ ...settings, deepgramApiKey: v })}
-            onTest={() => testApiKey('deepgram', settings.deepgramApiKey)}
-          />
-        </KeySection>
+          <KeySection
+            title="Deepgram"
+            note="Voice input and spoken answers. Without it the microphone stays disabled, you type instead, and answers are shown as text only."
+            docs={quota.voice && !quota.managedKeys ? 'https://console.deepgram.com' : undefined}
+            locked={!quota.voice}
+            lockedNote="Voice is on IGNITE and up. FREE is text-only."
+            managed={quota.managedKeys}
+            onUpgrade={onUpgrade}
+          >
+            <KeyRow
+              label="API key"
+              value={settings.deepgramApiKey}
+              state={testResults.deepgram}
+              onChange={(v) => setSettings({ ...settings, deepgramApiKey: v })}
+              onTest={() => testApiKey('deepgram', settings.deepgramApiKey)}
+            />
+          </KeySection>
 
-        <KeySection
-          title="Privacy"
-          note="Controls what SPARK is allowed to send to Groq. Query execution is always local; this governs the AI calls only."
-        >
-          <div className="flex flex-col gap-2">
-            {PRIVACY_OPTIONS.map((opt) => {
-              const active = (settings.privacy?.level ?? 'standard') === opt.value;
-              return (
+          <KeySection
+            title="Privacy"
+            note="Controls what SPARK is allowed to send to Groq. Query execution is always local; this governs the AI calls only."
+          >
+            <div className="flex flex-col gap-2">
+              {PRIVACY_OPTIONS.map((opt) => {
+                const active = (settings.privacy?.level ?? 'standard') === opt.value;
+                const locked = opt.value === 'local' && !quota.offlineSupport;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() =>
+                      locked ? onUpgrade?.() : setSettings({ ...settings, privacy: { level: opt.value } })
+                    }
+                    className={cx(
+                      'text-left rounded-lg border px-3 py-2.5 transition-colors',
+                      active
+                        ? 'border-accent-line bg-accent-soft'
+                        : locked
+                        ? 'border-line-subtle opacity-60'
+                        : 'border-line-subtle hover:border-line'
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cx(
+                          'h-3 w-3 shrink-0 rounded-full border',
+                          active ? 'border-accent bg-accent' : 'border-line'
+                        )}
+                      />
+                      <span className="text-sm font-medium text-ink">{opt.label}</span>
+                      {locked && <IconLock size={11} className="text-faint" />}
+                      {locked && (
+                        <span className="ml-auto text-xs text-accent">
+                          BLAZE and up
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 pl-5 text-xs leading-relaxed text-muted">{opt.detail}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </KeySection>
+
+          <section>
+            <h3 className="text-md font-medium text-ink">Legal</h3>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+              {LEGAL_DOCS.map((d) => (
                 <button
-                  key={opt.value}
+                  key={d.doc}
                   type="button"
-                  onClick={() => setSettings({ ...settings, privacy: { level: opt.value } })}
-                  className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${
-                    active
-                      ? 'border-accent-line bg-accent-soft'
-                      : 'border-line-subtle hover:border-line'
-                  }`}
+                  onClick={() => onOpenLegal?.(d.doc)}
+                  className="text-xs text-faint transition-colors duration-1 hover:text-ink"
                 >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-3 w-3 shrink-0 rounded-full border ${
-                        active ? 'border-accent bg-accent' : 'border-line'
-                      }`}
-                    />
-                    <span className="text-sm font-medium text-ink">{opt.label}</span>
-                  </div>
-                  <p className="mt-1 pl-5 text-xs leading-relaxed text-muted">{opt.detail}</p>
+                  {d.label}
                 </button>
-              );
-            })}
-          </div>
-        </KeySection>
+              ))}
+            </div>
+          </section>
+        </div>
       </div>
-    </Modal>
+
+      <div className="flex items-center justify-end gap-2 border-t border-line-subtle px-6 py-3">
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" loading={isLoading} onClick={handleSave}>
+          Save
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -216,19 +272,38 @@ function KeySection({
   note,
   required,
   docs,
+  locked,
+  lockedNote,
+  managed,
+  onUpgrade,
   children,
 }: {
   title: string;
   note: string;
   required?: boolean;
   docs?: string;
+  locked?: boolean;
+  lockedNote?: string;
+  /** THUNDER only — SPARK supplies this key, so there's nothing to enter. */
+  managed?: boolean;
+  onUpgrade?: () => void;
   children: React.ReactNode;
 }) {
   return (
     <section>
       <div className="flex items-baseline gap-2">
         <h3 className="text-md font-medium text-ink">{title}</h3>
-        {docs ? (
+        {managed ? (
+          <span className="flex items-center gap-1 text-xs text-accent">
+            <IconCheck size={10} />
+            Managed by SPARK
+          </span>
+        ) : locked ? (
+          <span className="flex items-center gap-1 text-xs text-faint">
+            <IconLock size={10} />
+            Locked
+          </span>
+        ) : docs ? (
           required ? (
             <span className="text-xs text-accent">Required</span>
           ) : (
@@ -236,7 +311,15 @@ function KeySection({
           )
         ) : null}
         <span className="flex-1" />
-        {docs ? (
+        {managed ? null : locked ? (
+          <button
+            type="button"
+            onClick={onUpgrade}
+            className="text-xs text-accent transition-colors duration-1 hover:text-accent-hi"
+          >
+            Upgrade →
+          </button>
+        ) : docs ? (
           <button
             type="button"
             onClick={() => window.electronAPI?.openExternal(docs)}
@@ -246,8 +329,16 @@ function KeySection({
           </button>
         ) : null}
       </div>
-      <p className="mb-2.5 mt-0.5 max-w-[58ch] text-sm leading-relaxed text-muted">{note}</p>
-      <div className="space-y-2">{children}</div>
+      <p className="mb-2.5 mt-0.5 max-w-[58ch] text-sm leading-relaxed text-muted">
+        {managed
+          ? `Your THUNDER plan includes this — SPARK's own key is used automatically, nothing to paste here.`
+          : locked && lockedNote
+          ? lockedNote
+          : note}
+      </p>
+      {!managed && (
+        <div className={cx('space-y-2', locked && 'pointer-events-none opacity-40')}>{children}</div>
+      )}
     </section>
   );
 }

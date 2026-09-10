@@ -6,7 +6,7 @@ declare global {
     electronAPI?: {
       getSettings: () => Promise<any>;
       saveSettings: (settings: any) => Promise<any>;
-      uploadCSV: () => Promise<any>;
+      uploadCSV: (maxSizeBytes?: number) => Promise<any>;
       listCSVFiles: () => Promise<any>;
       deleteCSV: (fileName: string) => Promise<any>;
       // Handles CSV, JSON and Excel. A workbook returns one table per sheet in
@@ -15,7 +15,7 @@ declare global {
       processQuery: (data: any) => Promise<any>;
       generateTTS: (data: any) => Promise<any>;
       openExternal: (url: string) => Promise<any>;
-      connectDatabase: (data: { type: DatabaseSourceType, config: any }) => Promise<any>;
+      connectDatabase: (data: { type: DatabaseSourceType, config: any, allowedTypes?: DataSourceType[] }) => Promise<any>;
       // Any source can be disconnected, including the file bucket.
       disconnectDatabase: (data: { type: DataSourceType }) => Promise<any>;
       getDatabaseSchema: (data: { connectionType: string; connectionConfig: any }) => Promise<{ success: boolean; schema?: any; graph?: any; error?: string }>;

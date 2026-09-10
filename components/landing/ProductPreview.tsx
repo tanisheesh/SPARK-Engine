@@ -242,7 +242,9 @@ export default function ProductPreview() {
                     <line x1="2.8" y1="2.8" x2="13.2" y2="13.2" stroke="#A9C08E" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
                     <line x1="13.2" y1="2.8" x2="2.8" y2="13.2" stroke="#A9C08E" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
                   </svg>
-                  <span className="text-xs font-semibold tracking-tight" style={{ color: '#F5F5F5' }}>SPARK</span>
+                  <span className="text-xs font-semibold tracking-tight" style={{ color: '#F5F5F5' }}>
+                    SPARK <span style={{ color: '#6A6A6A', fontWeight: 500 }}>Engine</span>
+                  </span>
                 </div>
               </div>
 

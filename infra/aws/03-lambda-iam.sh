@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Creates one execution role shared by all Lambdas, scoped to exactly
-# what they need: write CloudWatch Logs, and read/write the 2 tables from
+# what they need: write CloudWatch Logs, and read/write the 3 tables from
 # 02-dynamodb.sh. Nothing broader — no wildcard dynamodb:*, no other
 # tables, no other AWS services.
 set -euo pipefail
@@ -39,7 +39,8 @@ DYNAMO_POLICY=$(cat <<EOF
     "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query", "dynamodb:DeleteItem"],
     "Resource": [
       "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/${TABLE_SUBSCRIPTIONS}",
-      "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/${TABLE_PAYMENTS}"
+      "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/${TABLE_PAYMENTS}",
+      "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/${TABLE_USAGE}"
     ]
   }]
 }
