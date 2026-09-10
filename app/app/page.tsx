@@ -33,7 +33,7 @@ import {
   ToastMsg,
   ToastStack,
 } from '../../components/ui/Primitives';
-import { IconPlug, SparkMark } from '../../components/ui/Icons';
+import { IconClose, IconPlug, SparkMark } from '../../components/ui/Icons';
 
 import type {
   ApiSettings,
@@ -201,6 +201,11 @@ export default function Home() {
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [question, setQuestion] = useState('');
+  // Right-click "Follow up on this" on an earlier turn arms this, anchoring
+  // the next submitted question's context to that turn instead of the
+  // default "every done turn so far" — useful once the thread has moved on
+  // and the user wants to branch off something further back.
+  const [followUpAnchor, setFollowUpAnchor] = useState<{ id: string; label: string } | null>(null);
   const [runningAction, setRunningAction] = useState<string | null>(null);
   const [artifact, setArtifact] = useState<ArtifactKind | null>(null);
 
@@ -626,7 +631,12 @@ export default function Home() {
   );
 
   const runQuestion = useCallback(
-    async (q: string, originAction?: string, displayQuestion?: string) => {
+    async (
+      q: string,
+      originAction?: string,
+      displayQuestion?: string,
+      opts?: { replyToTurnId?: string; historyOverride?: Turn[]; edited?: boolean }
+    ) => {
       const text = q.trim();
       if (!text || busy) return;
       // Studio actions send a whole restated prompt to the backend (the
@@ -634,6 +644,21 @@ export default function Home() {
       // show as "the question" in a turn or the conversations list —
       // displayQuestion carries the clean, human version instead.
       const shownQuestion = (displayQuestion ?? text).trim() || text;
+
+      // Follow-ups ("ab 20k karke batao") only resolve if the model can see
+      // what was actually asked and run before. historyOverride lets a caller
+      // hand in an explicit turn list (edit: the truncated conversation;
+      // follow-up-on-an-older-turn: sliced up to that turn) instead of
+      // defaulting to "every done turn so far in this conversation".
+      let baseTurns = opts?.historyOverride ?? turns;
+      if (opts?.replyToTurnId) {
+        const idx = baseTurns.findIndex((t) => t.id === opts.replyToTurnId);
+        if (idx !== -1) baseTurns = baseTurns.slice(0, idx + 1);
+      }
+      const conversationHistory = baseTurns
+        .filter((t) => t.status === 'done')
+        .slice(-4)
+        .map((t) => ({ question: t.question, sql: t.sql, answer: t.answer }));
 
       if (!effectiveSettings.groqApiKey) {
         toast('Add your Groq API key to start asking.', 'error');
@@ -677,6 +702,8 @@ export default function Home() {
         status: 'thinking',
         createdAt: Date.now(),
         trace: [],
+        replyToTurnId: opts?.replyToTurnId,
+        edited: opts?.edited,
       };
 
       setConversations((prev) =>
@@ -706,6 +733,7 @@ export default function Home() {
           settings: effectiveSettings,
           voiceAllowed: canSpeak,
           wideTableColumnCap: quota.wideTableColumnCap,
+          conversationHistory,
         });
 
         if (cancelledRef.current.has(turnId)) {
@@ -770,7 +798,28 @@ export default function Home() {
       playAudio,
       quota,
       toast,
+      turns,
     ]
+  );
+
+  // Editing a turn's question discards it and everything after it in the
+  // conversation (same as ChatGPT-style edit) and regenerates from there —
+  // the truncated list is computed from data already in hand rather than
+  // re-read from state after the truncating setConversations call, since
+  // that update wouldn't be visible yet within this same synchronous call.
+  const editTurn = useCallback(
+    (turnId: string, newQuestion: string) => {
+      const idx = turns.findIndex((t) => t.id === turnId);
+      if (idx === -1) return;
+      const truncated = turns.slice(0, idx);
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeId ? { ...c, updatedAt: Date.now(), turns: truncated } : c
+        )
+      );
+      runQuestion(newQuestion, undefined, undefined, { historyOverride: truncated, edited: true });
+    },
+    [turns, activeId, runQuestion]
   );
 
   const cancelRun = useCallback(() => {
@@ -1067,6 +1116,11 @@ export default function Home() {
                         setQuestion(q);
                         composerRef.current?.focus();
                       }}
+                      onEdit={editTurn}
+                      onFollowUpOnTurn={(t) => {
+                        setFollowUpAnchor({ id: t.id, label: rootQuestion(t.question) });
+                        composerRef.current?.focus();
+                      }}
                       onOpenSettings={() => openSettings()}
                       onConnect={() => openFileUpload()}
                       onSpeak={speak}
@@ -1080,10 +1134,27 @@ export default function Home() {
 
             <div className="border-t border-line-subtle px-6 py-3">
               <div className="mx-auto w-full max-w-[720px]">
+                {followUpAnchor && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent-line bg-accent-soft px-2.5 py-1.5 text-sm">
+                    <span className="text-muted">Following up on:</span>
+                    <span className="min-w-0 flex-1 truncate text-ink">{followUpAnchor.label}</span>
+                    <button
+                      type="button"
+                      onClick={() => setFollowUpAnchor(null)}
+                      className="text-faint transition-colors duration-1 hover:text-ink"
+                    >
+                      <IconClose size={12} />
+                    </button>
+                  </div>
+                )}
                 <QueryComposer
                   value={question}
                   onChange={setQuestion}
-                  onSubmit={() => runQuestion(question)}
+                  onSubmit={() => {
+                    const anchor = followUpAnchor;
+                    setFollowUpAnchor(null);
+                    runQuestion(question, undefined, undefined, anchor ? { replyToTurnId: anchor.id } : undefined);
+                  }}
                   onCancel={cancelRun}
                   voiceState={voiceState}
                   onToggleVoice={() => (isListening ? stopListening() : startListening())}

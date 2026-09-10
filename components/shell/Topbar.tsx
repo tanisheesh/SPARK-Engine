@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { IconSearch, IconClose } from '../ui/Icons';
-import { IconButton, Kbd, cx } from '../ui/Primitives';
+import { IconButton, cx } from '../ui/Primitives';
 
 /* ============================================================
    A 44px rule with a title and one control. Everything else that
@@ -45,7 +45,6 @@ export function Topbar({
       >
         <IconSearch size={13} className="shrink-0 text-faint" />
         <span className="flex-1 truncate text-sm text-faint">Search or run a command</span>
-        <Kbd>⌘K</Kbd>
       </button>
 
       {onClose && (

@@ -73,6 +73,16 @@ export interface Turn {
   createdAt: number;
   completedAt?: number;
 
+  /**
+   * Which earlier turn's Q&A this one was anchored to as follow-up context,
+   * when that differs from "every done turn before it in this conversation"
+   * (set via the turn context menu's Follow up action). Absent for a plain
+   * typed question, which threads the whole conversation so far.
+   */
+  replyToTurnId?: string;
+  /** Set once, when a previous version of this turn was edited into this one. */
+  edited?: boolean;
+
   answer?: string;
   sql?: string;
   rows?: Row[];

@@ -171,6 +171,15 @@ export default function FileUpload({ isOpen, onClose, onFileSelected, currentDat
       loadCSVFiles();
       loadSavedConnections();
 
+      // The modal fully unmounts on close (page.tsx renders it only while
+      // showFileUpload is true), so isConnected/connectionType would otherwise
+      // reset to their initial false/null on every reopen and show "Connect
+      // to dataset" even though a source is already connected. currentDatasetType
+      // is the parent's real-time source of truth — resync from it on open.
+      setIsConnected(!!currentDatasetType);
+      setConnectionType(currentDatasetType);
+      if (currentDatasetType) setActiveTab(currentDatasetType);
+
       // Listen for upload progress
       if (window.electronAPI) {
         const progressHandler = (event: any, progress: any) => {
