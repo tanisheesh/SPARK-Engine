@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getSession, signOut, type SparkUser } from '../../lib/auth';
-import { consumeQuery, fetchBillingStatus } from '../../lib/api';
-import type { Tier } from '../../lib/api';
+import { consumeQuery, fetchBillingStatus, fetchManagedKeys } from '../../lib/api';
+import type { ManagedKeys, Tier } from '../../lib/api';
 
 import SettingsModal from '../../components/SettingsModal';
 import FileUpload from '../../components/FileUpload';
@@ -33,7 +33,7 @@ import {
   ToastMsg,
   ToastStack,
 } from '../../components/ui/Primitives';
-import { IconPlug, SparkMark } from '../../components/ui/Icons';
+import { IconClose, IconPlug, SparkMark } from '../../components/ui/Icons';
 
 import type {
   ApiSettings,
@@ -152,6 +152,13 @@ export default function Home() {
 
   /* ---------- settings ---------- */
   const [apiSettings, setApiSettings] = useState<ApiSettings>({});
+  // THUNDER's real managed Groq/Deepgram keys, fetched from lambda/managed-keys
+  // once the plan is confirmed as THUNDER. Deliberately separate from
+  // apiSettings (which is only ever what the user typed themselves): these
+  // are SPARK's own shared secret, so they must never be written to
+  // settings.json or shown in a form field, only merged in-memory at the
+  // point of actual use (effectiveSettings below).
+  const [managedKeys, setManagedKeys] = useState<ManagedKeys>({ groqApiKey: null, deepgramApiKey: null });
   const [showSettings, setShowSettings] = useState(false);
 
   /* ---------- data source ---------- */
@@ -204,6 +211,11 @@ export default function Home() {
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [question, setQuestion] = useState('');
+  // Right-click "Follow up on this" on an earlier turn arms this, anchoring
+  // the next submitted question's context to that turn instead of the
+  // default "every done turn so far" — useful once the thread has moved on
+  // and the user wants to branch off something further back.
+  const [followUpAnchor, setFollowUpAnchor] = useState<{ id: string; label: string } | null>(null);
   const [runningAction, setRunningAction] = useState<string | null>(null);
   const [artifact, setArtifact] = useState<ArtifactKind | null>(null);
 
@@ -226,7 +238,6 @@ export default function Home() {
   const audioUrlRef = useRef<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const pttRef = useRef(false);
 
   const toast = useCallback((text: string, tone?: ToastMsg['tone']) => {
     setToasts((t) => [...t, { id: Date.now() + Math.random(), text, tone }]);
@@ -239,12 +250,21 @@ export default function Home() {
   const connected = !!currentDataset && !!datasetType;
   const connState: ConnState = connected ? 'connected' : 'disconnected';
   const quota = quotaFor(plan);
+  // The only place BYOK settings and THUNDER's managed keys actually meet:
+  // managed keys win when present (they only ever are for a confirmed
+  // THUNDER account — see loadBillingStatus), otherwise fall back to
+  // whatever the user typed into Settings themselves. Never persisted —
+  // apiSettings is what gets saved to settings.json, this is not.
+  const effectiveSettings: ApiSettings = {
+    groqApiKey: managedKeys.groqApiKey || apiSettings.groqApiKey,
+    deepgramApiKey: managedKeys.deepgramApiKey || apiSettings.deepgramApiKey,
+  };
   // Voice (both STT and TTS) is an IGNITE-and-up feature. A leftover
   // Deepgram key from a prior higher tier (or from before a downgrade)
   // must not re-enable it — the tier check comes first, always.
-  const micEnabled = quota.voice && !!apiSettings.deepgramApiKey;
-  const canSpeak = quota.voice && !!apiSettings.deepgramApiKey;
-  const settingsConfigured = !!apiSettings.groqApiKey;
+  const micEnabled = quota.voice && !!effectiveSettings.deepgramApiKey;
+  const canSpeak = quota.voice && !!effectiveSettings.deepgramApiKey;
+  const settingsConfigured = !!effectiveSettings.groqApiKey;
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -258,10 +278,15 @@ export default function Home() {
   );
   const busy = !!lastTurn && ['thinking', 'querying', 'answering'].includes(lastTurn.status);
 
+  // Deepgram streams interim transcripts live, so the question box fills in
+  // WHILE the mic is still recording — there is no separate "listening,
+  // then transcribing" phase to distinguish. Flipping state the moment
+  // question got any text used to drop the "Listening" label (and the
+  // "pause when done" hint) about a second in, as soon as the first
+  // partial transcript arrived, even though the mic kept recording for the
+  // rest of what you said.
   const voiceState: VoiceState = isListening
-    ? question.trim()
-      ? 'transcribing'
-      : 'listening'
+    ? 'listening'
     : isSpeaking
     ? 'speaking'
     : busy
@@ -287,6 +312,21 @@ export default function Home() {
     try {
       const status = await fetchBillingStatus();
       setPlan(status.tier);
+
+      if (quotaFor(status.tier).managedKeys) {
+        try {
+          const keys = await fetchManagedKeys();
+          setManagedKeys(keys);
+        } catch (e) {
+          // Fail open on the fetch itself, same as consumeQuery — a network
+          // hiccup here shouldn't be indistinguishable from "not THUNDER".
+          console.error('Failed to load managed keys', e);
+        }
+      } else {
+        // A downgrade from THUNDER must not leave a stale managed key
+        // usable in memory for the rest of the session.
+        setManagedKeys({ groqApiKey: null, deepgramApiKey: null });
+      }
     } catch (e) {
       console.error('Failed to load billing status', e);
     }
@@ -547,14 +587,14 @@ export default function Home() {
         return;
       }
       try {
-        const res = await window.electronAPI!.generateTTS({ text, settings: apiSettings, voiceAllowed: canSpeak });
+        const res = await window.electronAPI!.generateTTS({ text, settings: effectiveSettings, voiceAllowed: canSpeak });
         if (res?.success && res.audioData) playAudio(res.audioData, res.mimeType);
         else toast(res?.error ?? 'Voice output failed.', 'error');
       } catch (e) {
         toast('Voice output failed: ' + (e as Error).message, 'error');
       }
     },
-    [apiSettings, canSpeak, playAudio, toast]
+    [effectiveSettings, canSpeak, playAudio, toast]
   );
 
   const toggleMute = () => {
@@ -612,7 +652,7 @@ export default function Home() {
 
       const ws = new WebSocket(
         'wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en&endpointing=true',
-        ['token', apiSettings.deepgramApiKey!]
+        ['token', effectiveSettings.deepgramApiKey!]
       );
       wsRef.current = ws;
 
@@ -653,7 +693,7 @@ export default function Home() {
       toast('SPARK could not access your microphone.', 'error');
       stopListening();
     }
-  }, [apiSettings.deepgramApiKey, micEnabled, stopListening, toast]);
+  }, [effectiveSettings.deepgramApiKey, micEnabled, stopListening, toast]);
 
   useEffect(() => () => stopListening(), [stopListening]);
 
@@ -677,7 +717,12 @@ export default function Home() {
   );
 
   const runQuestion = useCallback(
-    async (q: string, originAction?: string, displayQuestion?: string) => {
+    async (
+      q: string,
+      originAction?: string,
+      displayQuestion?: string,
+      opts?: { replyToTurnId?: string; historyOverride?: Turn[]; edited?: boolean }
+    ) => {
       const text = q.trim();
       if (!text || busy) return;
       // Studio actions send a whole restated prompt to the backend (the
@@ -686,7 +731,22 @@ export default function Home() {
       // displayQuestion carries the clean, human version instead.
       const shownQuestion = (displayQuestion ?? text).trim() || text;
 
-      if (!apiSettings.groqApiKey) {
+      // Follow-ups ("ab 20k karke batao") only resolve if the model can see
+      // what was actually asked and run before. historyOverride lets a caller
+      // hand in an explicit turn list (edit: the truncated conversation;
+      // follow-up-on-an-older-turn: sliced up to that turn) instead of
+      // defaulting to "every done turn so far in this conversation".
+      let baseTurns = opts?.historyOverride ?? turns;
+      if (opts?.replyToTurnId) {
+        const idx = baseTurns.findIndex((t) => t.id === opts.replyToTurnId);
+        if (idx !== -1) baseTurns = baseTurns.slice(0, idx + 1);
+      }
+      const conversationHistory = baseTurns
+        .filter((t) => t.status === 'done')
+        .slice(-4)
+        .map((t) => ({ question: t.question, sql: t.sql, answer: t.answer }));
+
+      if (!effectiveSettings.groqApiKey) {
         toast('Add your Groq API key to start asking.', 'error');
         openSettings();
         return;
@@ -728,6 +788,8 @@ export default function Home() {
         status: 'thinking',
         createdAt: Date.now(),
         trace: [],
+        replyToTurnId: opts?.replyToTurnId,
+        edited: opts?.edited,
       };
 
       setConversations((prev) =>
@@ -754,9 +816,10 @@ export default function Home() {
         const result = await window.electronAPI.processQuery({
           question: text,
           csvFile: path,
-          settings: apiSettings,
+          settings: effectiveSettings,
           voiceAllowed: canSpeak,
           wideTableColumnCap: quota.wideTableColumnCap,
+          conversationHistory,
         });
 
         if (cancelledRef.current.has(turnId)) {
@@ -810,7 +873,7 @@ export default function Home() {
       }
     },
     [
-      apiSettings,
+      effectiveSettings,
       busy,
       canSpeak,
       connected,
@@ -821,7 +884,28 @@ export default function Home() {
       playAudio,
       quota,
       toast,
+      turns,
     ]
+  );
+
+  // Editing a turn's question discards it and everything after it in the
+  // conversation (same as ChatGPT-style edit) and regenerates from there —
+  // the truncated list is computed from data already in hand rather than
+  // re-read from state after the truncating setConversations call, since
+  // that update wouldn't be visible yet within this same synchronous call.
+  const editTurn = useCallback(
+    (turnId: string, newQuestion: string) => {
+      const idx = turns.findIndex((t) => t.id === turnId);
+      if (idx === -1) return;
+      const truncated = turns.slice(0, idx);
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeId ? { ...c, updatedAt: Date.now(), turns: truncated } : c
+        )
+      );
+      runQuestion(newQuestion, undefined, undefined, { historyOverride: truncated, edited: true });
+    },
+    [turns, activeId, runQuestion]
   );
 
   const cancelRun = useCallback(() => {
@@ -934,20 +1018,6 @@ export default function Home() {
      ============================================================ */
 
   useEffect(() => {
-    /* Space is push-to-talk, but Space also activates whatever is focused.
-       Only claim it when focus is somewhere inert, or a keyboard user could
-       never press a button again. */
-    const isInteractive = (el: EventTarget | null) => {
-      const n = el as HTMLElement | null;
-      if (!n || !n.tagName) return false;
-      return (
-        ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A', 'SUMMARY', 'OPTION'].includes(n.tagName) ||
-        n.isContentEditable ||
-        n.getAttribute('role') === 'button' ||
-        n.closest('[role="dialog"]') !== null
-      );
-    };
-
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
 
@@ -979,28 +1049,11 @@ export default function Home() {
         if (isSpeaking) stopAudio();
         return;
       }
-      // Push-to-talk, only when focus is not on something Space already drives.
-      if (e.code === 'Space' && !isInteractive(e.target) && !e.repeat && !busy && micEnabled) {
-        e.preventDefault();
-        pttRef.current = true;
-        startListening();
-      }
-    };
-
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && pttRef.current) {
-        pttRef.current = false;
-        stopListening();
-      }
     };
 
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, [busy, isListening, isSpeaking, micEnabled, navigateTo, startListening, stopListening, stopAudio, cancelRun]);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [busy, isListening, isSpeaking, navigateTo, stopListening, stopAudio, cancelRun]);
 
   /* ============================================================
      Render
@@ -1149,6 +1202,11 @@ export default function Home() {
                         setQuestion(q);
                         composerRef.current?.focus();
                       }}
+                      onEdit={editTurn}
+                      onFollowUpOnTurn={(t) => {
+                        setFollowUpAnchor({ id: t.id, label: rootQuestion(t.question) });
+                        composerRef.current?.focus();
+                      }}
                       onOpenSettings={() => openSettings()}
                       onConnect={() => openFileUpload()}
                       onSpeak={speak}
@@ -1162,10 +1220,27 @@ export default function Home() {
 
             <div className="border-t border-line-subtle px-6 py-3">
               <div className="mx-auto w-full max-w-[720px]">
+                {followUpAnchor && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent-line bg-accent-soft px-2.5 py-1.5 text-sm">
+                    <span className="text-muted">Following up on:</span>
+                    <span className="min-w-0 flex-1 truncate text-ink">{followUpAnchor.label}</span>
+                    <button
+                      type="button"
+                      onClick={() => setFollowUpAnchor(null)}
+                      className="text-faint transition-colors duration-1 hover:text-ink"
+                    >
+                      <IconClose size={12} />
+                    </button>
+                  </div>
+                )}
                 <QueryComposer
                   value={question}
                   onChange={setQuestion}
-                  onSubmit={() => runQuestion(question)}
+                  onSubmit={() => {
+                    const anchor = followUpAnchor;
+                    setFollowUpAnchor(null);
+                    runQuestion(question, undefined, undefined, anchor ? { replyToTurnId: anchor.id } : undefined);
+                  }}
                   onCancel={cancelRun}
                   voiceState={voiceState}
                   onToggleVoice={() => (isListening ? stopListening() : startListening())}

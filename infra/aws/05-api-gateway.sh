@@ -81,6 +81,7 @@ add_route "POST"   "/billing/create-order" "billing-create-order"   "yes"
 add_route "POST"   "/billing/verify-payment" "billing-verify-payment" "yes"
 add_route "POST"   "/billing/webhook"      "billing-webhook"        "no"
 add_route "POST"   "/usage/consume"        "usage-consume"          "yes"
+add_route "GET"    "/managed-keys"         "managed-keys"           "yes"
 
 echo "==> Deploying \$default auto-deploy stage"
 aws apigatewayv2 create-stage \

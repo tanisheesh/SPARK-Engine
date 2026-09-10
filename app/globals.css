@@ -194,21 +194,6 @@ html {
   animation: s-in var(--dur-2) var(--ease) both;
 }
 
-/* Live: the microphone is open. A bar meter, not a glow. */
-@keyframes s-meter {
-  0%,
-  100% {
-    transform: scaleY(0.3);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-.a-meter {
-  animation: s-meter 900ms var(--ease) infinite;
-  transform-origin: center;
-}
-
 /* Live: a pipeline stage is in flight. A travelling tick on the rail. */
 @keyframes s-rail {
   from {

@@ -37,14 +37,16 @@ function priceFor(tier, cycle) {
 }
 
 /* Usage quotas — mirrors the "Limits" sections of TIERS.txt. Enforced by
-   lambda/usage-consume (queries) and checked client-side before an upload
-   (CSV size, in FileUpload.tsx). null means unlimited (THUNDER). */
+   lambda/usage-consume (queries), lambda/managed-keys (managedKeys — only
+   THUNDER gets SPARK's own Groq/Deepgram keys) and checked client-side
+   before an upload (CSV size, in FileUpload.tsx). null means unlimited
+   (THUNDER). */
 const QUOTAS = {
-  FREE: { queriesPerMonth: 300, queriesPerDay: 10, csvSizeGb: 25 },
-  IGNITE: { queriesPerMonth: 600, queriesPerDay: 20, csvSizeGb: 100 },
-  BLAZE: { queriesPerMonth: 1200, queriesPerDay: 40, csvSizeGb: 200 },
-  STORM: { queriesPerMonth: 2400, queriesPerDay: 80, csvSizeGb: 400 },
-  THUNDER: { queriesPerMonth: null, queriesPerDay: null, csvSizeGb: null },
+  FREE: { queriesPerMonth: 300, queriesPerDay: 10, csvSizeGb: 25, managedKeys: false },
+  IGNITE: { queriesPerMonth: 600, queriesPerDay: 20, csvSizeGb: 100, managedKeys: false },
+  BLAZE: { queriesPerMonth: 1200, queriesPerDay: 40, csvSizeGb: 200, managedKeys: false },
+  STORM: { queriesPerMonth: 2400, queriesPerDay: 80, csvSizeGb: 400, managedKeys: false },
+  THUNDER: { queriesPerMonth: null, queriesPerDay: null, csvSizeGb: null, managedKeys: true },
 };
 
 function quotaFor(tier) {

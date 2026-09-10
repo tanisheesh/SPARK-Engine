@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { IconMic, IconSend, IconStop, IconSpeaker, IconSpeakerOff } from '../ui/Icons';
-import { cx, IconButton, Kbd, Spinner } from '../ui/Primitives';
+import { cx, IconButton, Spinner } from '../ui/Primitives';
 import type { VoiceState } from '../../lib/spark/types';
 
 /* ============================================================
@@ -14,7 +14,6 @@ const BUSY: VoiceState[] = ['thinking', 'querying', 'answering'];
 
 const STATUS_COPY: Partial<Record<VoiceState, string>> = {
   listening: 'Listening',
-  transcribing: 'Transcribing',
   thinking: 'Understanding your question',
   querying: 'Running analysis',
   answering: 'Preparing your answer',
@@ -59,7 +58,7 @@ export function QueryComposer({
   const ref = inputRef ?? localRef;
 
   const busy = BUSY.includes(voiceState);
-  const listening = voiceState === 'listening' || voiceState === 'transcribing';
+  const listening = voiceState === 'listening';
   const canSubmit = value.trim().length > 0 && !busy && !disabled;
 
   useEffect(() => {
@@ -137,12 +136,6 @@ export function QueryComposer({
             <span className="text-sm font-medium">{listening ? 'Listening' : 'Voice'}</span>
           </button>
 
-          {!listening && !busy && micEnabled && (
-            <span className="hidden items-center gap-1 pl-1 text-xs text-faint lg:flex">
-              <Kbd>Space</Kbd> to talk
-            </span>
-          )}
-
           <div className="flex-1" />
 
           {canSpeak && (
@@ -189,14 +182,41 @@ export function QueryComposer({
 
 /* Four bars. It reports that the microphone is open — it is not
    pretending to measure amplitude, so it stays a fixed cadence. */
+// Driven by a timer, not the CSS `animation` property: Chromium clamps
+// animation/transition durations to ~instant whenever the OS says to
+// reduce motion (Windows Settings > Accessibility > Visual effects >
+// Animation effects, off) — every bar would still be present in the DOM,
+// just visibly frozen at its resting frame. A JS-driven loop is just
+// repeated style writes, not a CSS timing primitive, so that clamp
+// doesn't apply to it — the meter keeps moving regardless of the OS
+// setting, same as the mic itself keeps recording regardless of it.
 function Meter() {
+  const barsRef = useRef<(HTMLSpanElement | null)[]>([]);
+
+  useEffect(() => {
+    const start = performance.now();
+    const id = setInterval(() => {
+      const t = performance.now() - start;
+      barsRef.current.forEach((el, i) => {
+        if (!el) return;
+        const phase = ((t + i * 120) % 900) / 900;
+        const scale = 0.3 + 0.7 * Math.abs(Math.sin(phase * Math.PI));
+        el.style.transform = `scaleY(${scale.toFixed(3)})`;
+      });
+    }, 50);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <span className="flex h-2.5 items-center gap-[2px]" aria-hidden="true">
       {[0, 1, 2, 3].map((i) => (
         <span
           key={i}
-          className="a-meter block h-full w-[2px] rounded-full bg-accent"
-          style={{ animationDelay: `${i * 120}ms` }}
+          ref={(el) => {
+            barsRef.current[i] = el;
+          }}
+          className="block h-full w-[2px] rounded-full bg-accent"
+          style={{ transformOrigin: '50% center' }}
         />
       ))}
     </span>

@@ -24,6 +24,13 @@ export RAZORPAY_KEY_ID="${RAZORPAY_KEY_ID:-}"
 export RAZORPAY_KEY_SECRET="${RAZORPAY_KEY_SECRET:-}"
 export RAZORPAY_WEBHOOK_SECRET="${RAZORPAY_WEBHOOK_SECRET:-}"
 
+# --- Managed Groq/Deepgram keys (THUNDER only, lambda/managed-keys) ---
+# SPARK's own keys, used automatically for THUNDER accounts so they never
+# see a BYOK prompt. Lambda-only secret — never shipped to the client or
+# the packaged app; a non-THUNDER caller gets 403 from the Lambda itself.
+export MANAGED_GROQ_API_KEY="${MANAGED_GROQ_API_KEY:-}"
+export MANAGED_DEEPGRAM_API_KEY="${MANAGED_DEEPGRAM_API_KEY:-}"
+
 # --- Derived resource names (rarely need changing) --------------------
 export USER_POOL_NAME="${PROJECT}-users"
 export TABLE_SUBSCRIPTIONS="${PROJECT}-subscriptions"

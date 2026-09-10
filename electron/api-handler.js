@@ -258,7 +258,7 @@ function composeLocalAnswer(question, rows) {
  * receiving its 'query-progress' events exactly as before whether or not a
  * remote caller is also listening.
  */
-async function processQuery({ question, csvFile, settings, voiceAllowed, wideTableColumnCap, onProgress }) {
+async function processQuery({ question, csvFile, settings, voiceAllowed, wideTableColumnCap, conversationHistory, onProgress }) {
   try {
     // The privacy level is read from disk here, NOT taken from the renderer
     // argument. A renderer-supplied level could be silently downgraded by a bug
@@ -383,8 +383,27 @@ async function processQuery({ question, csvFile, settings, voiceAllowed, wideTab
     // what DuckDB actually said.
     const MAX_SQL_ATTEMPTS = 3;
     let sqlQuery, normalizedSql, queryResults;
+
+    // Follow-up questions ("ab 20k karke batao" after a query limited to 10k)
+    // only resolve if the model can see what was actually asked and run before
+    // — so recent turns come in as real conversation turns, not a stateless
+    // one-shot. Capped to the last few: each entry costs prompt tokens, and a
+    // stale table/column reference from turn 1 shouldn't leak into turn 20.
+    const historyMessages = [];
+    if (Array.isArray(conversationHistory)) {
+      for (const turn of conversationHistory.slice(-4)) {
+        if (!turn || !turn.question) continue;
+        historyMessages.push({ role: 'user', content: turn.question });
+        historyMessages.push({
+          role: 'assistant',
+          content: turn.sql ? `SQL used: ${turn.sql}` : (turn.answer || ''),
+        });
+      }
+    }
+
     let sqlMessages = [
       { role: 'system', content: sqlSystemPrompt },
+      ...historyMessages,
       { role: 'user', content: question },
     ];
 

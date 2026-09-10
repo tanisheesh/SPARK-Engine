@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Turn } from '../../lib/spark/types';
 import { inferChart } from '../../lib/spark/chart';
 import { followUps, rootQuestion } from '../../lib/spark/studio';
@@ -9,6 +9,7 @@ import { duration, relativeTime } from '../../lib/spark/format';
 import { ChartCard, Disclosure, QueryTrace, SQLViewer, tablesUsed } from './Evidence';
 import { DataTable } from './DataTable';
 import {
+  IconAsk,
   IconEdit,
   IconPlug,
   IconRefresh,
@@ -32,6 +33,8 @@ export interface TurnViewProps {
   onFollowUp: (q: string) => void;
   onRetry: (turn: Turn) => void;
   onEditQuestion: (q: string) => void;
+  onEdit: (turnId: string, newQuestion: string) => void;
+  onFollowUpOnTurn: (turn: Turn) => void;
   onOpenSettings: () => void;
   onConnect: () => void;
   onSpeak: (text: string) => void;
@@ -44,6 +47,8 @@ export function TurnView({
   onFollowUp,
   onRetry,
   onEditQuestion,
+  onEdit,
+  onFollowUpOnTurn,
   onOpenSettings,
   onConnect,
   onSpeak,
@@ -52,16 +57,81 @@ export function TurnView({
   const chart = useMemo(() => (turn.status === 'done' ? inferChart(turn.rows) : null), [turn]);
   const chips = useMemo(() => followUps(turn), [turn]);
   const [showTable, setShowTable] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState(false);
+  const [draft, setDraft] = useState('');
 
   const elapsed = turn.completedAt ? turn.completedAt - turn.createdAt : undefined;
 
+  const startEdit = () => {
+    setDraft(rootQuestion(turn.question));
+    setEditingQuestion(true);
+  };
+  const saveEdit = () => {
+    const text = draft.trim();
+    setEditingQuestion(false);
+    if (text && text !== rootQuestion(turn.question)) onEdit(turn.id, text);
+  };
+
   return (
     <article className="a-rise px-6 py-6">
+
       {/* The question. Understated, right-aligned, on its own line. */}
       <div className="mb-5 flex justify-end">
-        <div className="max-w-[80%] rounded-lg border border-line-subtle bg-surface2 px-2.5 py-1.5">
-          <p className="m-0 text-base leading-snug text-muted">{rootQuestion(turn.question)}</p>
-        </div>
+        {editingQuestion ? (
+          <div className="w-full max-w-[80%] rounded-lg border border-accent-line bg-surface2 p-2">
+            <textarea
+              autoFocus
+              rows={2}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  saveEdit();
+                } else if (e.key === 'Escape') {
+                  setEditingQuestion(false);
+                }
+              }}
+              className="block w-full resize-none bg-transparent text-base leading-snug text-ink placeholder:text-faint focus:outline-none"
+            />
+            <div className="mt-1.5 flex items-center justify-end gap-1.5">
+              <Button size="sm" onClick={() => setEditingQuestion(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" variant="primary" onClick={saveEdit}>
+                Save &amp; regenerate
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="group flex max-w-[80%] items-center gap-1">
+            {turn.status === 'done' && (
+              <button
+                type="button"
+                onClick={() => onFollowUpOnTurn(turn)}
+                title="Follow up on this"
+                className="opacity-0 transition-opacity duration-1 group-hover:opacity-100"
+              >
+                <IconAsk size={12} className="text-faint hover:text-ink" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={startEdit}
+              title="Edit question"
+              className="opacity-0 transition-opacity duration-1 group-hover:opacity-100"
+            >
+              <IconEdit size={12} className="text-faint hover:text-ink" />
+            </button>
+            <div className="rounded-lg border border-line-subtle bg-surface2 px-2.5 py-1.5">
+              <p className="m-0 text-base leading-snug text-muted">{rootQuestion(turn.question)}</p>
+              {turn.replyToTurnId && (
+                <p className="m-0 mt-0.5 text-2xs text-faint">↪ following up on an earlier answer</p>
+              )}
+              {turn.edited && <p className="m-0 mt-0.5 text-2xs text-faint">edited</p>}
+            </div>
+          </div>
+        )}
       </div>
 
       <div>
@@ -180,6 +250,7 @@ export function TurnView({
     </article>
   );
 }
+
 
 function execMs(turn: Turn): number | undefined {
   const s = turn.trace.find((x) => x.stage === 'execute');

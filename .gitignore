@@ -35,6 +35,10 @@ electron/models/*.gguf
 activity_logs_12gb.csv
 *.csv
 
+# Generated demo/sample datasets (multi-GB, regenerate with
+# scripts/generate-sample-data-*.js — never commit these)
+/sample-data/
+
 # OS files
 .DS_Store
 Thumbs.db
