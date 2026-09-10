@@ -28,6 +28,7 @@ import { RelayClient, type RelaySnapshot } from '../api/relay';
 import {
   cacheConversations,
   clearAll,
+  clearSession,
   loadCachedConversations,
   loadQueue,
   loadSession,
@@ -70,6 +71,11 @@ interface SessionValue {
   signInAccount: () => Promise<void>;
   signInPairing: (code: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Drops the pairing token so the code screen returns, keeping the cached
+      conversations. A rotated pairing code is routine — the desktop mints a
+      fresh one every time it reconnects — so it must not require the
+      full sign-out that also wipes local history. */
+  unpair: () => Promise<void>;
 
   refreshConversations: () => Promise<void>;
   getConversation: (id: string) => Promise<Conversation>;
@@ -295,6 +301,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [connect]
   );
 
+  const unpair = useCallback(async () => {
+    client.disconnect();
+    await clearSession();
+    setSession(null);
+    // Conversations and queue survive: they belong to the same desktop the
+    // user is about to re-pair with, and re-fetching them costs a round trip
+    // they do not need to pay for a code change.
+    setConversationsStale(true);
+  }, [client]);
+
   const signOut = useCallback(async () => {
     client.disconnect();
     await clearAll();
@@ -320,6 +336,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       signInAccount,
       signInPairing,
       signOut,
+      unpair,
       refreshConversations,
       getConversation,
       ask,
@@ -339,6 +356,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       signInAccount,
       signInPairing,
       signOut,
+      unpair,
       refreshConversations,
       getConversation,
       ask,

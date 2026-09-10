@@ -32,6 +32,8 @@ type Props = NativeStackScreenProps<RootStackParams, 'Conversations'>;
 
 export function ConversationsScreen({ navigation }: Props) {
   const {
+    session,
+    unpair,
     conversations,
     conversationsStale,
     relay,
@@ -93,6 +95,26 @@ export function ConversationsScreen({ navigation }: Props) {
         }
         ListHeaderComponent={
           <View>
+            {/* The desktop mints a fresh pairing code on every reconnect, which
+                strands this phone in the old code's room. Indistinguishable
+                from "desktop asleep" unless we say so here. */}
+            {session?.mode === 'pairing' && relay.state === 'online' && !relay.engineOnline ? (
+              <Panel style={{ margin: space.lg, marginBottom: 0 }}>
+                <Mono size="micro" weight="faint">
+                  DESKTOP OFFLINE
+                </Mono>
+                <Txt size="small" weight="muted" style={{ marginTop: space.sm }}>
+                  If you reconnected the desktop it generated a new pairing code, and this phone
+                  is still using the old one.
+                </Txt>
+                <Button
+                  label="Enter a new pairing code"
+                  style={{ marginTop: space.md }}
+                  onPress={() => void unpair()}
+                />
+              </Panel>
+            ) : null}
+
             {queue.length ? (
               <Panel style={{ margin: space.lg, marginBottom: 0 }}>
                 <Mono size="micro" weight="accent">

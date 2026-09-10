@@ -17,7 +17,7 @@ import { Button, Divider, Dot, Mono, Row, Txt } from '../components/Primitives';
 type Props = NativeStackScreenProps<RootStackParams, 'Account'>;
 
 export function AccountScreen({ navigation }: Props) {
-  const { session, relay, desktopName, activeSource, queue, signOut } = useSession();
+  const { session, relay, desktopName, activeSource, queue, signOut, unpair } = useSession();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: color.bg }} edges={['top']}>
@@ -97,8 +97,18 @@ export function AccountScreen({ navigation }: Props) {
           </Txt>
         </Field>
 
-        <View style={{ marginTop: space.md }}>
-          <Button label="Sign out" onPress={() => void signOut()} />
+        {/* In pairing mode there is no account to sign out of, and the thing
+            people actually need is to re-enter a rotated code. Naming that
+            action "Sign out" hides it behind the wrong word. */}
+        <View style={{ marginTop: space.md, gap: space.sm }}>
+          {session?.mode === 'pairing' ? (
+            <>
+              <Button label="Enter a new pairing code" onPress={() => void unpair()} />
+              <Button label="Unpair and clear this phone" variant="ghost" onPress={() => void signOut()} />
+            </>
+          ) : (
+            <Button label="Sign out" onPress={() => void signOut()} />
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>

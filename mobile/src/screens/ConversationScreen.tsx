@@ -33,6 +33,8 @@ type Props = NativeStackScreenProps<RootStackParams, 'Conversation'>;
 export function ConversationScreen({ route, navigation }: Props) {
   const initialId = route.params.conversationId;
   const {
+    session,
+    unpair,
     relay,
     activeSource,
     desktopName,
@@ -256,7 +258,13 @@ export function ConversationScreen({ route, navigation }: Props) {
         ) : null}
 
         {!ready ? (
-          <OfflineNotice relay={relay} sourceName={sourceName} queued={relevantQueue.length} />
+          <OfflineNotice
+            relay={relay}
+            sourceName={sourceName}
+            queued={relevantQueue.length}
+            pairingMode={session?.mode === 'pairing'}
+            onRepair={() => void unpair()}
+          />
         ) : null}
 
         {sendError ? (

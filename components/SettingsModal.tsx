@@ -316,12 +316,16 @@ function RemoteAccessSection({
   const online = status?.state === 'online';
   const connecting = status?.state === 'connecting' || status?.state === 'retrying';
 
-  const connect = async () => {
+  /* Reconnecting reuses the code this session already handed out. Minting a
+     fresh one every time silently strands any phone that paired with the old
+     one — the desktop looks connected, the phone says "desktop offline", and
+     nothing on either screen explains why. Rotating is an explicit choice. */
+  const connect = async (forceNewCode = false) => {
     const api = window.electronAPI;
     if (!api?.remoteConnect) return;
     setBusy(true);
     setError(null);
-    const pairing = generatePairingCode();
+    const pairing = !forceNewCode && code ? code : generatePairingCode();
     try {
       const res = await api.remoteConnect({
         relayUrl: relayUrl.trim(),
@@ -370,8 +374,13 @@ function RemoteAccessSection({
             Disconnect
           </Button>
         ) : (
-          <Button variant="primary" onClick={connect} loading={busy} disabled={!relayUrl.trim()}>
-            Pair a device
+          <Button
+            variant="primary"
+            onClick={() => connect(false)}
+            loading={busy}
+            disabled={!relayUrl.trim()}
+          >
+            {code ? 'Reconnect' : 'Pair a device'}
           </Button>
         )}
         <span className="flex items-center gap-1.5 text-xs text-faint">
@@ -396,7 +405,18 @@ function RemoteAccessSection({
           <p className="text-2xs uppercase tracking-wide text-faint">Pairing code</p>
           <p className="font-mono text-2xl tracking-[0.3em] text-ink">{code}</p>
           <p className="mt-1 text-xs text-muted">
-            Enter this in SPARK Mobile. It is valid while this desktop stays connected.
+            Enter this in SPARK Mobile. Reconnecting keeps the same code, so a paired phone stays
+            paired.
+          </p>
+          <button
+            type="button"
+            onClick={() => connect(true)}
+            className="mt-2 text-xs text-faint underline transition-colors duration-1 hover:text-ink"
+          >
+            Generate a new code
+          </button>
+          <p className="mt-1 text-2xs text-faint">
+            A new code unpairs every phone using the old one.
           </p>
         </div>
       ) : null}

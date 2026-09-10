@@ -13,7 +13,7 @@ import { View } from 'react-native';
 
 import type { RelaySnapshot } from '../api/relay';
 import { color, radius, space } from '../theme';
-import { Dot, Mono, Row, Txt } from './Primitives';
+import { Button, Dot, Mono, Row, Txt } from './Primitives';
 
 export function canAsk(relay: RelaySnapshot): boolean {
   return relay.state === 'online' && relay.engineOnline;
@@ -51,12 +51,24 @@ export function OfflineNotice({
   relay,
   sourceName,
   queued,
+  pairingMode,
+  onRepair,
 }: {
   relay: RelaySnapshot;
   sourceName?: string | null;
   queued: number;
+  /** True when the session is a dev pairing code rather than an account. */
+  pairingMode?: boolean;
+  onRepair?: () => void;
 }) {
   const phoneProblem = relay.state !== 'online';
+
+  /* The specific trap this covers: the desktop mints a NEW pairing code every
+     time it reconnects, which silently strands the phone in the old code's
+     room. From here it looks identical to "desktop is asleep", so the fix has
+     to be offered here — hunting for a "sign out" button to re-pair is not a
+     path anyone will find. */
+  const codeMayHaveChanged = pairingMode && !phoneProblem && !relay.engineOnline;
 
   return (
     <View
@@ -90,6 +102,20 @@ export function OfflineNotice({
           ? 'SPARK can’t reach the relay right now. Your question can be queued and sent once the connection returns.'
           : 'SPARK can’t query this dataset right now. Your question can be queued and sent when the desktop becomes available.'}
       </Txt>
+
+      {codeMayHaveChanged ? (
+        <View style={{ marginTop: space.lg }}>
+          <Txt size="small" weight="muted">
+            If you reconnected the desktop, it generated a new pairing code and this phone is
+            still using the old one.
+          </Txt>
+          <Button
+            label="Enter a new pairing code"
+            style={{ marginTop: space.md }}
+            onPress={() => onRepair?.()}
+          />
+        </View>
+      ) : null}
 
       {queued > 0 ? (
         <Mono size="micro" weight="accent" style={{ marginTop: space.md }}>
