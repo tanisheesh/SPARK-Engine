@@ -1,0 +1,18 @@
+{
+  "name": "spark-relay",
+  "version": "1.0.0",
+  "description": "SPARK remote-session relay - routes frames between the desktop engine and the mobile client",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node test/relay.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

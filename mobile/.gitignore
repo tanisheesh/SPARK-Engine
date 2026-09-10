@@ -1,0 +1,40 @@
+# SPARK Mobile. This folder is designed to become its own repository, so this
+# ignore list is complete on its own rather than relying on the parent repo's.
+
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+
+# Env files hold the relay address and client ids for a particular machine.
+# The root .gitignore ignores .env* repo-wide, so the template is re-included
+# here explicitly — it is the only documentation of what must be configured.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Native build output. `expo prebuild` generates these; they are not sources.
+/android/
+/ios/
+*.apk
+*.aab
+*.ipa
+*.keystore
+*.jks
+
+# EAS
+.easignore
+
+# Logs / OS / editor
+*.log
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# TypeScript
+*.tsbuildinfo

@@ -6,6 +6,7 @@ import { IconCheck, IconClose, IconLock, IconSearch } from './ui/Icons';
 import { quotaFor } from '../lib/spark/quotas';
 import type { Tier } from '../lib/api';
 import type { LegalDoc } from './legal/TermsBody';
+import type { RemoteStatus } from '../types/electron';
 
 type PrivacyLevel = 'standard' | 'strict' | 'local';
 
@@ -13,6 +14,9 @@ interface Settings {
   groqApiKey: string;
   deepgramApiKey: string;
   privacy?: { level: PrivacyLevel };
+  /** SPARK Mobile. Only the relay address is stored; the pairing code is
+      generated per session and deliberately never written to disk. */
+  remote?: { relayUrl?: string };
 }
 
 const PRIVACY_OPTIONS: { value: PrivacyLevel; label: string; detail: string }[] = [
@@ -237,6 +241,18 @@ export default function SettingsModal({ isOpen, onClose, onSave, plan, onUpgrade
             </div>
           </KeySection>
 
+          <KeySection
+            title="Remote access"
+            note="Lets SPARK Mobile ask questions against the dataset connected here. Your desktop connects out to a relay — no port is opened on this machine, and no data leaves it beyond the answers you ask for."
+          >
+            <RemoteAccessSection
+              relayUrl={settings.remote?.relayUrl ?? ''}
+              onRelayUrlChange={(relayUrl) =>
+                setSettings({ ...settings, remote: { ...settings.remote, relayUrl } })
+              }
+            />
+          </KeySection>
+
           <section>
             <h3 className="text-md font-medium text-ink">Legal</h3>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
@@ -261,6 +277,159 @@ export default function SettingsModal({ isOpen, onClose, onSave, plan, onUpgrade
           Save
         </Button>
       </div>
+    </div>
+  );
+}
+
+/* ---------- remote access ---------- */
+
+/* Ambiguous glyphs are omitted: this code gets read off a screen and typed
+   into a phone, and 0/O and 1/I/l are exactly where that goes wrong. */
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generatePairingCode(): string {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+}
+
+function RemoteAccessSection({
+  relayUrl,
+  onRelayUrlChange,
+}: {
+  relayUrl: string;
+  onRelayUrlChange: (value: string) => void;
+}) {
+  const [status, setStatus] = useState<RemoteStatus | null>(null);
+  const [code, setCode] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.remoteStatus) return;
+    api.remoteStatus().then(setStatus).catch(() => {});
+    api.onRemoteStatus?.((_e, next) => setStatus(next));
+    return () => api.removeAllListeners?.('remote-status');
+  }, []);
+
+  const online = status?.state === 'online';
+  const connecting = status?.state === 'connecting' || status?.state === 'retrying';
+
+  /* Reconnecting reuses the code this session already handed out. Minting a
+     fresh one every time silently strands any phone that paired with the old
+     one — the desktop looks connected, the phone says "desktop offline", and
+     nothing on either screen explains why. Rotating is an explicit choice. */
+  const connect = async (forceNewCode = false) => {
+    const api = window.electronAPI;
+    if (!api?.remoteConnect) return;
+    setBusy(true);
+    setError(null);
+    const pairing = !forceNewCode && code ? code : generatePairingCode();
+    try {
+      const res = await api.remoteConnect({
+        relayUrl: relayUrl.trim(),
+        token: `dev:${pairing}`,
+      });
+      if (!res.success) {
+        setError(res.error ?? 'Could not connect');
+        return;
+      }
+      setCode(pairing);
+      if (res.status) setStatus(res.status);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not connect');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    const api = window.electronAPI;
+    if (!api?.remoteDisconnect) return;
+    setBusy(true);
+    try {
+      const res = await api.remoteDisconnect();
+      setStatus(res.status);
+      setCode(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Field label="Relay address">
+        <Input
+          value={relayUrl}
+          placeholder="ws://192.168.1.20:8787/session"
+          onChange={(e) => onRelayUrlChange(e.target.value)}
+          disabled={online || connecting}
+        />
+      </Field>
+
+      <div className="flex items-center gap-2">
+        {online || connecting ? (
+          <Button onClick={disconnect} loading={busy}>
+            Disconnect
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            onClick={() => connect(false)}
+            loading={busy}
+            disabled={!relayUrl.trim()}
+          >
+            {code ? 'Reconnect' : 'Pair a device'}
+          </Button>
+        )}
+        <span className="flex items-center gap-1.5 text-xs text-faint">
+          <span
+            className={cx(
+              'h-1.5 w-1.5 rounded-full',
+              online ? 'bg-accent' : connecting ? 'bg-warning' : 'bg-faint'
+            )}
+          />
+          {online
+            ? 'Connected'
+            : connecting
+              ? 'Connecting…'
+              : status?.state === 'error'
+                ? 'Failed'
+                : 'Off'}
+        </span>
+      </div>
+
+      {online && code ? (
+        <div className="rounded-md border border-accent-line bg-accent-soft px-3 py-2.5">
+          <p className="text-2xs uppercase tracking-wide text-faint">Pairing code</p>
+          <p className="font-mono text-2xl tracking-[0.3em] text-ink">{code}</p>
+          <p className="mt-1 text-xs text-muted">
+            Enter this in SPARK Mobile. Reconnecting keeps the same code, so a paired phone stays
+            paired.
+          </p>
+          <button
+            type="button"
+            onClick={() => connect(true)}
+            className="mt-2 text-xs text-faint underline transition-colors duration-1 hover:text-ink"
+          >
+            Generate a new code
+          </button>
+          <p className="mt-1 text-2xs text-faint">
+            A new code unpairs every phone using the old one.
+          </p>
+        </div>
+      ) : null}
+
+      {status?.lastError && !online ? (
+        <p className="text-xs text-muted">{status.lastError}</p>
+      ) : null}
+      {error ? <p className="text-xs text-muted">{error}</p> : null}
+
+      <p className="text-xs text-faint">
+        Pairing codes are for development against a local relay. Anyone with the code reaches this
+        desktop, so keep the relay on your own network until account sign-in is configured.
+      </p>
     </div>
   );
 }

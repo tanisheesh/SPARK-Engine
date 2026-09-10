@@ -22,6 +22,10 @@ const DatabaseConnector = require('./database-connector');
 const sourceRegistry = require('./source-registry');
 const secureStore = require('./secure-store');
 const profiler = require('./privacy/synthesize');
+// Remote sessions (SPARK Mobile). Dials out to a relay when the user turns it
+// on in Settings; completely inert otherwise - it opens no port and starts no
+// connection of its own at boot.
+const remote = require('./remote');
 
 // App settings directory - cross-platform (Windows: %APPDATA%, macOS: ~/Library/Application Support)
 const settingsDir = app.getPath('userData');
@@ -80,6 +84,7 @@ function createWindow() {
     
     // Set mainWindow reference in API handler
     setMainWindow(mainWindow);
+    remote.setMainWindow(mainWindow);
 
     // Warm up the local fallback model in the background (non-blocking) so
     // it's ready if Groq turns out to be down when the user actually asks
@@ -179,8 +184,13 @@ app.whenReady().then(async () => {
     console.error('⚠️ Failed to cleanup DuckDB:', cleanupError);
   }
   
+  // Registers the remote-session IPC surface and opens the conversation
+  // mirror. Does not connect to anything - that needs an explicit opt-in from
+  // Settings.
+  remote.init();
+
   createWindow();
-  
+
   // Disable default menu completely
   Menu.setApplicationMenu(null);
 });
@@ -199,6 +209,9 @@ app.on('activate', () => {
 
 // Release the DuckDB file lock cleanly before the process exits
 app.on('before-quit', () => {
+  // Close the relay socket before the process goes away so connected phones
+  // see "desktop offline" immediately instead of waiting for a ping timeout.
+  remote.shutdown();
   duckdbClient.closeSync();
 });
 
